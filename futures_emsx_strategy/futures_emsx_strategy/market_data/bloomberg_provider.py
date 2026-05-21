@@ -8,7 +8,7 @@ SUBSCRIPTION_DATA events to registered callbacks.
 from __future__ import annotations
 
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 from ..core.events import BarClosed, MarketTick
@@ -161,11 +161,12 @@ class BloombergMarketDataProvider(MarketDataProvider):
                 bar_data = msg.getElement("barData").getElement("barTickData")
                 for i in range(bar_data.numValues()):
                     b = bar_data.getValueAsElement(i)
+                    start = b.getElementAsDatetime("time")
                     bars.append(
                         BarClosed(
                             instrument=instrument,
-                            start_time=b.getElementAsDatetime("time"),
-                            end_time=b.getElementAsDatetime("time"),
+                            start_time=start,
+                            end_time=start + timedelta(minutes=interval_minutes),
                             open=b.getElementAsFloat("open"),
                             high=b.getElementAsFloat("high"),
                             low=b.getElementAsFloat("low"),

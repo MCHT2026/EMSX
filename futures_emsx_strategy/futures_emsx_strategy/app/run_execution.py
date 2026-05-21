@@ -47,48 +47,67 @@ def main(config_dir: str, metrics_port: int | None, emsx: bool, auto_route: bool
                     services.metrics.orders_rejected.labels(reason=reason.split(":")[0]).inc()
                 continue
 
-            ack = services.execution.submit_order(intent)
-            services.event_log.append("ExecutionAck", ack)
-            services.metrics.orders_submitted.labels(
-                instrument=intent.instrument, side=intent.side.value
-            ).inc()
+            # Internal id = idempotency_key. Stable across paper and EMSX so the
+            # synchronous paper callbacks find the record they need to update.
+            internal_id = intent.idempotency_key
             services.working.upsert(
-                order_id=ack.order_id,
+                order_id=internal_id,
                 instrument=intent.instrument,
                 side=intent.side,
                 leaves_qty=intent.qty,
-                status=OrderStatus.SENT if ack.accepted else OrderStatus.REJECTED,
+                status=OrderStatus.NEW,
             )
             lifecycle.register(
                 OrderRecord(
-                    order_id=ack.order_id,
+                    order_id=internal_id,
                     strategy_id=intent.strategy_id,
                     instrument=intent.instrument,
                     side=intent.side,
                     qty=intent.qty,
                     idempotency_key=intent.idempotency_key,
                     created_at=datetime.now(timezone.utc),
-                    status=OrderStatus.SENT if ack.accepted else OrderStatus.REJECTED,
-                    venue_order_id=ack.order_id,
-                    route_id=ack.route_id,
+                    status=OrderStatus.NEW,
                 )
             )
+
+            ack = services.execution.submit_order(intent)
+            services.event_log.append("ExecutionAck", ack)
+            services.metrics.orders_submitted.labels(
+                instrument=intent.instrument, side=intent.side.value
+            ).inc()
+            # Status is owned by callbacks (already advanced by paper adapter
+            # synchronously). Only record venue identifiers here.
+            lifecycle.set_venue_info(
+                order_id=internal_id,
+                venue_order_id=ack.order_id,
+                route_id=ack.route_id,
+            )
+            if not ack.accepted:
+                lifecycle.update_status(internal_id, OrderStatus.REJECTED)
+                services.working.upsert(
+                    order_id=internal_id,
+                    instrument=intent.instrument,
+                    side=intent.side,
+                    leaves_qty=0,
+                    status=OrderStatus.REJECTED,
+                )
 
     def on_execution_update(update: ExecutionUpdate) -> None:
         services.event_log.append("ExecutionUpdate", update)
         services.bus.publish(EXECUTION_UPDATES, update)
-        lifecycle.update_status(
-            order_id=update.order_id,
-            status=update.status,
-            filled_qty=update.filled_qty,
-            avg_price=update.avg_price,
-            route_id=update.route_id,
-            timestamp=update.timestamp,
-        )
-        rec = lifecycle.get(update.order_id)
+        # update.order_id may be the internal id (paper) or venue id (EMSX).
+        rec = lifecycle.resolve(update.order_id)
         if rec is not None:
+            lifecycle.update_status(
+                order_id=rec.order_id,
+                status=update.status,
+                filled_qty=update.filled_qty,
+                avg_price=update.avg_price,
+                route_id=update.route_id,
+                timestamp=update.timestamp,
+            )
             services.working.upsert(
-                order_id=update.order_id,
+                order_id=rec.order_id,
                 instrument=update.instrument,
                 side=rec.side,
                 leaves_qty=update.leaves_qty,

@@ -74,44 +74,46 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.1}\texttt  {storage.db}}{23}{subsection.10.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.2}\texttt  {storage.event\_log}}{23}{subsection.10.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {10.3}\texttt  {storage.repositories}}{23}{subsection.10.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {10.4}\texttt  {storage.snapshots}}{23}{subsection.10.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {11}Module \texttt  {messaging/}}{24}{section.11}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {11.1}\texttt  {messaging.bus}}{24}{subsection.11.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {11.2}\texttt  {messaging.in\_memory\_bus}}{24}{subsection.11.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {11.3}\texttt  {messaging.kafka\_bus}}{24}{subsection.11.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {11.4}\texttt  {messaging.redis\_bus}}{24}{subsection.11.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {12}Module \texttt  {monitoring/}}{25}{section.12}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {12.1}\texttt  {monitoring.metrics}}{25}{subsection.12.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {12.2}\texttt  {monitoring.health}}{25}{subsection.12.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {12.3}\texttt  {monitoring.alerts}}{25}{subsection.12.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {13}Module \texttt  {backtest/}}{26}{section.13}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {13.1}\texttt  {backtest.slippage}}{26}{subsection.13.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {13.2}\texttt  {backtest.commission}}{26}{subsection.13.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {13.3}\texttt  {backtest.replay}}{26}{subsection.13.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {13.4}\texttt  {backtest.engine}}{26}{subsection.13.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {13.5}\texttt  {backtest.reports}}{26}{subsection.13.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {14}Module \texttt  {app/}}{28}{section.14}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {14.1}\texttt  {app.topics}}{28}{subsection.14.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {14.2}\texttt  {app.wiring}}{28}{subsection.14.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {14.3}\texttt  {app.run\_market\_data}}{28}{subsection.14.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {14.4}\texttt  {app.run\_strategy}}{28}{subsection.14.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {14.5}\texttt  {app.run\_execution}}{29}{subsection.14.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {14.6}\texttt  {app.run\_reconciler}}{29}{subsection.14.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {14.7}\texttt  {app.run\_all\_local}}{29}{subsection.14.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {15}Topology \& guarantees}{30}{section.15}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {15.1}Service boundaries}{30}{subsection.15.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {15.2}Idempotency \& at-least-once delivery}{30}{subsection.15.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {15.3}State-machine invariants}{30}{subsection.15.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {15.4}Phased rollout flags}{30}{subsection.15.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {15.5}Error budget for live trading}{30}{subsection.15.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {16}Quick reference --- minimum contracts to satisfy when extending}{31}{section.16}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {16.1}Adding a market-data vendor}{31}{subsection.16.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {16.2}Adding a venue}{31}{subsection.16.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {16.3}Adding a strategy}{31}{subsection.16.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {16.4}Adding a risk check}{31}{subsection.16.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {16.5}Adding a bus implementation}{31}{subsection.16.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.4}\texttt  {storage.idempotency\_backend}}{23}{subsection.10.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.5}\texttt  {storage.snapshots}}{24}{subsection.10.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {11}Module \texttt  {messaging/}}{25}{section.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.1}\texttt  {messaging.bus}}{25}{subsection.11.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.2}\texttt  {messaging.codec}}{25}{subsection.11.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.3}\texttt  {messaging.in\_memory\_bus}}{25}{subsection.11.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.4}\texttt  {messaging.kafka\_bus}}{26}{subsection.11.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.5}\texttt  {messaging.redis\_bus}}{26}{subsection.11.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {12}Module \texttt  {monitoring/}}{27}{section.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {12.1}\texttt  {monitoring.metrics}}{27}{subsection.12.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {12.2}\texttt  {monitoring.health}}{27}{subsection.12.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {12.3}\texttt  {monitoring.alerts}}{27}{subsection.12.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {13}Module \texttt  {backtest/}}{28}{section.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.1}\texttt  {backtest.slippage}}{28}{subsection.13.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.2}\texttt  {backtest.commission}}{28}{subsection.13.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.3}\texttt  {backtest.replay}}{28}{subsection.13.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.4}\texttt  {backtest.engine}}{28}{subsection.13.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.5}\texttt  {backtest.reports}}{28}{subsection.13.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {14}Module \texttt  {app/}}{30}{section.14}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.1}\texttt  {app.topics}}{30}{subsection.14.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.2}\texttt  {app.wiring}}{30}{subsection.14.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.3}\texttt  {app.run\_market\_data}}{30}{subsection.14.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.4}\texttt  {app.run\_strategy}}{30}{subsection.14.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.5}\texttt  {app.run\_execution}}{31}{subsection.14.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.6}\texttt  {app.run\_reconciler}}{31}{subsection.14.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {14.7}\texttt  {app.run\_all\_local}}{31}{subsection.14.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {15}Topology \& guarantees}{32}{section.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.1}Service boundaries}{32}{subsection.15.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.2}Idempotency \& at-least-once delivery}{32}{subsection.15.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.3}State-machine invariants}{32}{subsection.15.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.4}Phased rollout flags}{32}{subsection.15.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {15.5}Error budget for live trading}{32}{subsection.15.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {16}Quick reference --- minimum contracts to satisfy when extending}{33}{section.16}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {16.1}Adding a market-data vendor}{33}{subsection.16.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {16.2}Adding a venue}{33}{subsection.16.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {16.3}Adding a strategy}{33}{subsection.16.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {16.4}Adding a risk check}{33}{subsection.16.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {16.5}Adding a bus implementation}{33}{subsection.16.5}\protected@file@percent }
 \gdef \LT@i {\LT@entry 
     {1}{176.71652pt}\LT@entry 
     {1}{262.0748pt}}
-\@writefile{toc}{\contentsline {section}{\numberline {17}Test contract surface}{32}{section.17}\protected@file@percent }
-\gdef \@abspage@last{32}
+\@writefile{toc}{\contentsline {section}{\numberline {17}Test contract surface}{34}{section.17}\protected@file@percent }
+\gdef \@abspage@last{34}

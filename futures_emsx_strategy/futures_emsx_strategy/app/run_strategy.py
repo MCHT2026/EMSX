@@ -24,12 +24,10 @@ def main(config_dir: str, metrics_port: int | None) -> None:
         by_instrument.setdefault(strat.instrument, []).append(strat)
 
     def on_bar(_topic: str, bar) -> None:
-        instrument = getattr(bar, "instrument", None) or bar.get("instrument")
-        if instrument is None:
-            return
-        for strat in by_instrument.get(instrument, []):
-            targets = strat.on_bar(bar, services.positions)
-            for tgt in targets:
+        # Serializing buses decode to BarClosed via app.topics registry; in-process
+        # buses pass the original object. Either way ``bar.instrument`` is safe.
+        for strat in by_instrument.get(bar.instrument, []):
+            for tgt in strat.on_bar(bar, services.positions):
                 services.metrics.signals_total.labels(strategy=strat.strategy_id).inc()
                 services.event_log.append("TargetPosition", tgt)
                 services.bus.publish(TARGETS, tgt)

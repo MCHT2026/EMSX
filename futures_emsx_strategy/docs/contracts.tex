@@ -647,11 +647,12 @@ snapshot() -> dict[str, tuple[int, float]]   # symbol -> (qty, avg_cost)
 set(instrument: str, qty: int, avg_cost: float = 0.0) -> None
 is_flat(instrument: str) -> bool
 \end{lstlisting}
-\item[Avg-cost rule]
+\item[Avg-cost rule] Let $q_{\text{prior}}$ be the position before the fill, $q'$ the signed fill quantity, and $q_{\text{new}} = q_{\text{prior}} + q'$.
 \begin{itemize}[leftmargin=*,itemsep=2pt]
-  \item Adding to an existing position $\Rightarrow$ weighted average.
-  \item Reducing $\Rightarrow$ avg unchanged unless flipped.
-  \item Flipping side $\Rightarrow$ new avg = fill price.
+  \item \textbf{Open from flat / stack same side}: avg becomes the qty-weighted average of prior basis and fill price.
+  \item \textbf{Partial close} ($q_{\text{prior}}$ and $q_{\text{new}}$ same non-zero sign): avg \emph{unchanged}.
+  \item \textbf{Full close} ($q_{\text{new}} = 0$): avg reset to 0.
+  \item \textbf{Flip} ($q_{\text{prior}}$ and $q_{\text{new}}$ opposite non-zero signs): new avg = fill price.
 \end{itemize}
 \item[Concurrency] Thread-safe (internal lock).
 \end{description}
@@ -778,11 +779,15 @@ current() -> int           # events currently in window
 \item[\Cls{OrderLifecycle}] \begin{lstlisting}
 register(rec: OrderRecord) -> None
 get(order_id: str) -> OrderRecord | None
+by_venue_id(venue_order_id: str) -> OrderRecord | None
+resolve(order_id: str) -> OrderRecord | None
 update_status(order_id, status, filled_qty?, avg_price?,
               venue_order_id?, route_id?, timestamp?) -> OrderRecord | None
+set_venue_info(order_id, venue_order_id?, route_id?) -> OrderRecord | None
 all() -> list[OrderRecord]
-by_venue_id(venue_order_id: str) -> OrderRecord | None
 \end{lstlisting}
+\item[\code{resolve}] Looks up by internal id first, then by venue id; lets a single handler work for both the paper adapter (which reports the internal id in callbacks) and EMSX (which reports \code{EMSX\_SEQUENCE}).
+\item[\code{set_venue_info}] Updates venue identifiers only; never overwrites \code{status} or fill data, so a callback that has already advanced the order is not regressed by a post-submit bookkeeping write.
 \end{description}
 \end{contractbox}
 
@@ -1022,9 +1027,11 @@ __init__(get_mark: Callable[[str], float | None],
          slippage_ticks: float = 0.0,
          tick_size_lookup: Callable[[str], float] | None = None)
 \end{lstlisting}
+\item[Order-id convention] Uses \code{OrderIntent.idempotency_key} as the \code{order_id} in the ack and in every callback. The runner must pre-register the order under that same id in \Cls{WorkingOrderBook} and \Cls{OrderLifecycle} \emph{before} calling \code{submit_order}, since the \code{SENT}/fill/\code{FILLED} callbacks fire synchronously inside the call.
 \item[Behaviour]
 \begin{itemize}[leftmargin=*,itemsep=2pt]
-  \item On submit: emits \code{SENT} update, then a \Cls{FillUpdate}, then \code{FILLED} update.
+  \item On accept: emits \code{SENT} update, a \Cls{FillUpdate}, then \code{FILLED} update.
+  \item On reject (no mark available): emits a \code{REJECTED} update so any pre-registered working entry is cleared rather than left hanging.
   \item Fill price: \code{limit_price} for \code{LMT}; \code{mark + slippage\_ticks * tick\_size * side.sign} otherwise.
   \item Modifies are not supported.
 \end{itemize}
@@ -1073,7 +1080,22 @@ get_database(url: str | None = None) -> Database  # singleton helper
 \item[\Cls{OrderRepository}] \code{upsert(rec: OrderRecord, leaves_qty)}, \code{by_idempotency_key(key)} for crash-restart dedupe.
 \item[\Cls{FillRepository}] \code{insert(fill)}, \code{for_order(order_id)}.
 \item[\Cls{RiskDecisionRepository}] \code{insert(decision: RiskDecision)}.
-\item[\code{idempotency_key} uniqueness] Enforced by a \code{UNIQUE} constraint in \code{working\_orders}.
+\item[\code{idempotency_key} uniqueness] Enforced by a \code{UNIQUE} constraint in \code{working\_orders}, and by the dedicated \code{submitted\_intents} table that backs \Cls{SqliteIdempotencyBackend}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{storage.idempotency\_backend}}
+
+\begin{contractbox}{\Cls{SqliteIdempotencyBackend}}
+\begin{description}
+\item[Purpose] Persistent dedupe backend for \Cls{IdempotencyStore}. Survives process restart, so a re-played bar after a crash cannot resubmit an already-accepted order.
+\item[Signature] \begin{lstlisting}
+__init__(db: Database)
+has(key: str) -> bool
+add(key: str) -> None        # INSERT OR IGNORE on submitted_intents
+\end{lstlisting}
+\item[Wiring] Default backend assembled by \Fn{build_services}: \code{IdempotencyStore(backend=SqliteIdempotencyBackend(db))}.
+\item[Schema] \code{submitted_intents (idempotency_key PRIMARY KEY, submitted_at TEXT NOT NULL)}.
 \end{description}
 \end{contractbox}
 
@@ -1106,6 +1128,26 @@ class EventBus(ABC):
     def stop(self) -> None
 \end{lstlisting}
 \item[\code{Handler}] \code{Callable[[topic: str, payload: Any], None]}.
+\item[Payload contract] Handlers always receive the canonical event dataclass registered in \Cls{messaging.codec} for that topic, never a raw dict --- including for serializing buses.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{messaging.codec}}
+
+\begin{contractbox}{Topic registry + dataclass codec}
+\begin{description}
+\item[Purpose] Bridges JSON-serializing buses (Kafka, Redis) and typed handlers. Reconstructs the registered dataclass for each topic on decode so strategies and runners never have to branch on \code{dict} vs. dataclass.
+\item[Signature] \begin{lstlisting}
+register_topic(topic: str, event_type: type) -> None
+topic_type(topic: str) -> type | None
+encode(payload: Any) -> str
+decode(topic: str, raw: Any) -> Any
+to_jsonable(o: Any) -> Any
+from_dict(cls: type, data: dict) -> Any
+\end{lstlisting}
+\item[Coercion rules] Enums via \code{cls(value)}; \code{datetime} via \code{fromisoformat}; nested dataclasses recurse; \code{Optional}/\code{|None} unions strip \code{NoneType}; lists/tuples recurse into their element type.
+\item[Registration] \code{app.topics} performs the canonical bindings at import: \code{TICKS$\to$MarketTick}, \code{BARS$\to$BarClosed}, \code{TARGETS$\to$TargetPosition}, \code{INTENTS$\to$OrderIntent}, \code{RISK\_DECISIONS$\to$RiskDecision}, \code{EXECUTION\_UPDATES$\to$ExecutionUpdate}, \code{FILLS$\to$FillUpdate}, \code{KILL\_SWITCH$\to$KillSwitchEvent}. \code{register_topic} is idempotent; rebinding a topic to a different class raises \code{ValueError}.
+\item[Unregistered topics] \code{decode} returns the raw value unchanged --- safe pass-through for custom topics.
 \end{description}
 \end{contractbox}
 
@@ -1124,7 +1166,7 @@ class EventBus(ABC):
 \begin{contractbox}{\Cls{KafkaBus}}
 \begin{description}
 \item[Signature] \lstinline|KafkaBus(bootstrap: str, group_id: str = "fes")|
-\item[Encoding] Payloads JSON-serialized (dataclasses via \code{asdict}). Background consumer thread invokes handlers.
+\item[Encoding] \code{publish} runs \code{codec.encode}; the consumer thread runs \code{codec.decode(topic, raw)} so registered topics deliver typed dataclasses.
 \item[Use] Multi-service deployments.
 \item[Optional dep] \code{confluent-kafka}.
 \end{description}
@@ -1135,7 +1177,7 @@ class EventBus(ABC):
 \begin{contractbox}{\Cls{RedisStreamBus}}
 \begin{description}
 \item[Signature] \lstinline|RedisStreamBus(url: str, group: str = "fes", consumer: str = "fes-1")|
-\item[Semantics] Consumer-group reads via \code{XREADGROUP}; \code{XACK} after handler success.
+\item[Semantics] Consumer-group reads via \code{XREADGROUP}; \code{XACK} after handler success. \code{publish} runs \code{codec.encode}; the consumer thread runs \code{codec.decode(topic, raw)} before invoking handlers.
 \item[Optional dep] \code{redis}.
 \end{description}
 \end{contractbox}
@@ -1279,6 +1321,8 @@ build_services(
                               \code{positions, fills, pnl, exposure, working, idempotency,}\\
                               \code{order_manager, kill_switch, risk, execution, strategies}.
 \item[Defaults] \Cls{MockMarketDataProvider} and \Cls{PaperExecutionAdapter} when not overridden --- dev/test/paper trading work out of the box.
+\item[Idempotency wiring] \code{IdempotencyStore} is constructed with a \Cls{SqliteIdempotencyBackend} over the configured DB, so claimed keys persist across restarts.
+\item[Metrics-port resolution] If a CLI \code{--metrics-port} is given it wins; otherwise \code{environments.metrics_port} is used. A value of \code{0} or less disables the Prometheus HTTP endpoint in either source.
 \end{description}
 \end{contractbox}
 
@@ -1314,9 +1358,12 @@ build_services(
 \begin{enumerate}[leftmargin=*,itemsep=2pt]
   \item \Cls{OrderManager}\code{.on_target} $\to$ intents.
   \item Publish \code{INTENTS}; persist; run \Cls{PreTradeRiskGateway}\code{.validate}; persist + publish \code{RISK_DECISIONS}.
-  \item If approved, call \code{execution.submit_order}; update \Cls{WorkingOrderBook} and \Cls{OrderLifecycle}.
-  \item Inbound \code{ExecutionUpdate}/\code{FillUpdate} update lifecycle, working book, positions, PnL, metrics; publish \code{EXECUTION_UPDATES}, \code{FILLS}.
+  \item If approved: \emph{pre-register} the order in \Cls{WorkingOrderBook} and \Cls{OrderLifecycle} under \code{intent.idempotency_key} (status \code{NEW}). \emph{Then} call \code{execution.submit_order}.
+  \item Use \Cls{OrderLifecycle}\code{.set_venue_info} to record \code{ack.order_id} / \code{ack.route_id}. Do not overwrite status from the ack --- callbacks own it.
+  \item On rejection ack: write \code{REJECTED} status to lifecycle and zero out the working entry.
+  \item Inbound \code{ExecutionUpdate}/\code{FillUpdate} use \Cls{OrderLifecycle}\code{.resolve} (internal id, fallback venue id) and update lifecycle, working book, positions, PnL, metrics; publish \code{EXECUTION_UPDATES}, \code{FILLS}.
 \end{enumerate}
+\item[Why pre-register?] The paper adapter fires \code{SENT}/fill/\code{FILLED} callbacks synchronously inside \code{submit_order}. Without pre-registration, the runner's post-submit bookkeeping would race the callbacks and leave a phantom working entry stuck at \code{SENT}.
 \end{description}
 \end{contractbox}
 
@@ -1367,7 +1414,7 @@ The bus is treated as \emph{at-least-once}. Idempotency is enforced inside the \
 key = SHA1(strategy_id | instrument | bar_end | side | qty)[:16]
 \end{lstlisting}
 
-If the same key has already been claimed by \Cls{IdempotencyStore}, the intent is suppressed. The same key is also stored in \code{working\_orders.idempotency\_key} (\code{UNIQUE}), giving database-level dedupe across restarts.
+If the same key has already been claimed by \Cls{IdempotencyStore}, the intent is suppressed. \code{build_services} wires the store to \Cls{SqliteIdempotencyBackend}, persisting every claimed key into the \code{submitted_intents} table; a process crash or bar replay after restart therefore cannot resubmit a previously accepted order. The same key is the internal \code{order_id} used by paper-adapter callbacks, and is stored in \code{working\_orders.idempotency\_key} (\code{UNIQUE}) for the lifecycle audit trail.
 
 \subsection{State-machine invariants}
 
@@ -1444,6 +1491,11 @@ Test                                              & Invariant being enforced \\
 \code{unit/test\_order\_manager.py}               & $\Delta$ math, working-qty offset, sign of \code{Side.from\_delta}, idempotency dedupe. \\
 \code{unit/test\_pre\_trade\_risk.py}             & Each risk check rejects exactly its scenario; happy path approves. \\
 \code{unit/test\_positions\_pnl.py}               & Weighted-average cost, realized PnL with point value, unrealized when flat. \\
+\code{unit/test\_positions\_avg\_cost.py}         & Partial close keeps avg; full close resets to 0; flip sets avg to fill price. \\
+\code{unit/test\_codec.py}                        & Topic round-trip preserves enums and \code{datetime}; unregistered topics pass through. \\
+\code{unit/test\_paper\_cleanup.py}               & Paper fills leave no phantom working orders; rejected ack clears the pre-register. \\
+\code{unit/test\_sqlite\_idempotency.py}          & SQLite-backed claims survive a fresh \Cls{Database} instance on the same file. \\
+\code{unit/test\_bar\_invariants.py}              & Historical bars satisfy \code{end_time > start_time} from any provider. \\
 \code{unit/test\_state\_machine.py}               & Legal transition chain; post-terminal transitions are violations. \\
 \code{unit/test\_indicators.py}                   & Indicators return \code{None} until ready; constant series $\Rightarrow$ z-score 0. \\
 \code{integration/test\_end\_to\_end\_paper.py}   & Ticks $\to$ bars $\to$ strategy $\to$ risk $\to$ paper fills $\to$ position update. \\

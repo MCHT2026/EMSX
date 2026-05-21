@@ -91,3 +91,10 @@ CREATE TABLE IF NOT EXISTS kill_switch_events (
     actor           TEXT NOT NULL,
     occurred_at     TEXT NOT NULL
 );
+
+-- Dedicated dedupe table for OrderManager idempotency keys.
+-- Survives process restart so a re-played bar cannot produce duplicate orders.
+CREATE TABLE IF NOT EXISTS submitted_intents (
+    idempotency_key TEXT PRIMARY KEY,
+    submitted_at    TEXT NOT NULL
+);

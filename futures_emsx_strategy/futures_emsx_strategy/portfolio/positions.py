@@ -31,25 +31,37 @@ class PositionBook:
             return row.avg_cost
 
     def apply_fill(self, fill: FillUpdate) -> None:
-        """Update position and weighted-avg-cost. Realized PnL is computed in PnLCalculator."""
+        """Update position and weighted-avg-cost. Realized PnL is in PnLCalculator.
+
+        Rules:
+          - Adding to an existing position (or opening from flat): weighted avg.
+          - Partial close (same sign before and after): avg unchanged.
+          - Full close (lands on zero): avg reset to 0.
+          - Flip (sign changes through zero): new avg is the fill price.
+        """
         with self._lock:
             row = self._rows.setdefault(fill.instrument, _PositionRow())
             signed_qty = fill.fill_qty * fill.side.sign
-            if row.qty == 0 or (row.qty > 0) == (signed_qty > 0):
-                new_qty = row.qty + signed_qty
+            prior_qty = row.qty
+            new_qty = prior_qty + signed_qty
+
+            if prior_qty == 0 or (prior_qty > 0) == (signed_qty > 0):
+                # Opening from flat, or stacking on the same side.
                 if new_qty == 0:
                     row.avg_cost = 0.0
                 else:
                     row.avg_cost = (
-                        row.avg_cost * row.qty + fill.fill_price * signed_qty
+                        row.avg_cost * prior_qty + fill.fill_price * signed_qty
                     ) / new_qty
-                row.qty = new_qty
             else:
-                row.qty += signed_qty
-                if row.qty == 0:
+                # Opposite side: close, full close, or flip.
+                if new_qty == 0:
                     row.avg_cost = 0.0
-                elif (row.qty > 0) != (signed_qty > 0):
+                elif (prior_qty > 0) != (new_qty > 0):
+                    # Crossed through zero -> flipped sides. New basis = fill price.
                     row.avg_cost = fill.fill_price
+                # else: partial close, leave avg_cost as it was.
+            row.qty = new_qty
 
     def snapshot(self) -> dict[str, tuple[int, float]]:
         with self._lock:

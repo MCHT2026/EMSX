@@ -1,13 +1,17 @@
-"""Redis Streams bus. Soft-imported."""
+"""Redis Streams bus. Soft-imported.
+
+Payloads round-trip through ``codec.encode/decode`` so handlers always receive
+the registered dataclass type, not a raw dict.
+"""
 from __future__ import annotations
 
 import json
 import threading
-from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from ..core.logging import get_logger
 from .bus import EventBus, Handler
+from .codec import decode, encode
 
 log = get_logger(__name__)
 
@@ -17,12 +21,6 @@ try:
 except ImportError:
     redis = None  # type: ignore[assignment]
     _HAVE_REDIS = False
-
-
-def _to_json(o: Any) -> str:
-    if is_dataclass(o):
-        o = asdict(o)
-    return json.dumps(o, default=str)
 
 
 class RedisStreamBus(EventBus):
@@ -53,7 +51,7 @@ class RedisStreamBus(EventBus):
             self._thread.join(timeout=5.0)
 
     def publish(self, topic: str, payload: Any) -> None:
-        self._r.xadd(topic, {"data": _to_json(payload)})
+        self._r.xadd(topic, {"data": encode(payload)})
 
     def subscribe(self, topic: str, handler: Handler) -> None:
         self._subs.setdefault(topic, []).append(handler)
@@ -67,13 +65,14 @@ class RedisStreamBus(EventBus):
             for topic, messages in resp:
                 for msg_id, data in messages:
                     try:
-                        payload = json.loads(data["data"])
+                        raw = json.loads(data["data"])
                     except (json.JSONDecodeError, KeyError):
                         log.warning("redis_bad_message", topic=topic)
                         continue
+                    typed = decode(topic, raw)
                     for h in self._subs.get(topic, []):
                         try:
-                            h(topic, payload)
+                            h(topic, typed)
                         except Exception:  # noqa: BLE001
                             log.exception("redis_handler_failed", topic=topic)
                     self._r.xack(topic, self.group, msg_id)

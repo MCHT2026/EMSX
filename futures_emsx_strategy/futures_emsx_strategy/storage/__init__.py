@@ -1,6 +1,7 @@
 """Persistence: event log (append-only), state tables, snapshots."""
 from .db import Database, get_database
 from .event_log import EventLog, JsonlEventLog
+from .idempotency_backend import SqliteIdempotencyBackend
 from .repositories import (
     FillRepository,
     OrderRepository,
@@ -18,5 +19,6 @@ __all__ = [
     "PositionRepository",
     "RiskDecisionRepository",
     "SnapshotStore",
+    "SqliteIdempotencyBackend",
     "get_database",
 ]

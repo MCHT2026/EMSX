@@ -1,13 +1,17 @@
-"""Kafka-backed bus (confluent-kafka). Soft-imported so dev environments don't need it."""
+"""Kafka-backed bus (confluent-kafka). Soft-imported so dev environments don't need it.
+
+Payloads round-trip through ``codec.encode/decode`` so handlers always receive
+the registered dataclass type, not a raw dict.
+"""
 from __future__ import annotations
 
 import json
 import threading
-from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from ..core.logging import get_logger
 from .bus import EventBus, Handler
+from .codec import decode, encode
 
 log = get_logger(__name__)
 
@@ -18,12 +22,6 @@ except ImportError:
     Consumer = None  # type: ignore[misc,assignment]
     Producer = None  # type: ignore[misc,assignment]
     _HAVE_KAFKA = False
-
-
-def _to_json(o: Any) -> str:
-    if is_dataclass(o):
-        o = asdict(o)
-    return json.dumps(o, default=str)
 
 
 class KafkaBus(EventBus):
@@ -49,7 +47,7 @@ class KafkaBus(EventBus):
         self._producer.flush(5.0)
 
     def publish(self, topic: str, payload: Any) -> None:
-        self._producer.produce(topic, _to_json(payload).encode("utf-8"))
+        self._producer.produce(topic, encode(payload).encode("utf-8"))
         self._producer.poll(0)
 
     def subscribe(self, topic: str, handler: Handler) -> None:
@@ -67,13 +65,14 @@ class KafkaBus(EventBus):
             if msg is None or msg.error():
                 continue
             try:
-                payload = json.loads(msg.value())
+                raw = json.loads(msg.value())
             except json.JSONDecodeError:
                 log.warning("kafka_bad_message", topic=msg.topic())
                 continue
+            typed = decode(msg.topic(), raw)
             for h in self._subs.get(msg.topic(), []):
                 try:
-                    h(msg.topic(), payload)
+                    h(msg.topic(), typed)
                 except Exception:  # noqa: BLE001
                     log.exception("kafka_handler_failed", topic=msg.topic())
         c.close()

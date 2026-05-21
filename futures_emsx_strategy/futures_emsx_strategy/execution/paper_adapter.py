@@ -2,11 +2,17 @@
 
 Useful for Phase 1 staging — exercises every layer of the system except the
 real EMSX wire. Reads marks from a callable so tests can inject prices.
+
+Order-id convention: the adapter uses ``OrderIntent.idempotency_key`` as the
+order_id in the ack and in every subsequent callback. The runner pre-registers
+the order under that same id BEFORE calling ``submit_order``, so the
+synchronous SENT/FILL/FILLED callbacks find the lifecycle and working-book
+entries and update them correctly. Without this convention the runner's
+post-submit upsert would race the callbacks and leave phantom working orders.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from threading import Lock
 from typing import Callable
 
 from ..core.enums import OrderStatus, OrderType
@@ -30,8 +36,6 @@ class PaperExecutionAdapter(ExecutionAdapter):
         self.tick_size_lookup = tick_size_lookup or (lambda _s: 0.01)
         self._exec_callbacks: list[ExecutionUpdateCallback] = []
         self._fill_callbacks: list[FillCallback] = []
-        self._counter = 0
-        self._lock = Lock()
 
     def start(self) -> None:
         log.info("paper_adapter_started")
@@ -39,16 +43,25 @@ class PaperExecutionAdapter(ExecutionAdapter):
     def stop(self) -> None:
         log.info("paper_adapter_stopped")
 
-    def _next_id(self) -> str:
-        with self._lock:
-            self._counter += 1
-            return f"PAPER-{self._counter:08d}"
-
     def submit_order(self, order: OrderIntent) -> ExecutionAck:
-        order_id = self._next_id()
+        order_id = order.idempotency_key
         mark = self.get_mark(order.instrument)
         ack_ts = datetime.now(timezone.utc)
         if mark is None:
+            # Push a REJECTED update so any pre-registered working-book entry
+            # is cleared rather than left hanging in NEW/SENT forever.
+            rejected = ExecutionUpdate(
+                order_id=order_id,
+                route_id=order_id,
+                instrument=order.instrument,
+                status=OrderStatus.REJECTED,
+                filled_qty=0,
+                avg_price=None,
+                leaves_qty=0,
+                timestamp=ack_ts,
+            )
+            for cb in self._exec_callbacks:
+                cb(rejected)
             return ExecutionAck(
                 order_id=order_id,
                 route_id=order_id,

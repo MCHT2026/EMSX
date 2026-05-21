@@ -32,6 +32,7 @@ from ..risk.limits import RiskLimits
 from ..risk.pre_trade import PreTradeRiskGateway
 from ..storage.db import Database
 from ..storage.event_log import JsonlEventLog
+from ..storage.idempotency_backend import SqliteIdempotencyBackend
 from ..strategy.minute_strategy import MinuteFuturesStrategy
 
 log = get_logger(__name__)
@@ -76,7 +77,18 @@ def build_services(
     bus = make_bus(config.environments.bus, config.environments.bus_url)
     db = Database(config.environments.db_url)
     event_log = JsonlEventLog(config.environments.event_log_path)
-    metrics = Metrics(port=metrics_port if metrics_port is not None else None)
+    # CLI override wins; otherwise fall back to environments.yaml. A 0 or
+    # negative value in either disables the metrics HTTP endpoint.
+    effective_port: int | None
+    if metrics_port is not None:
+        effective_port = metrics_port if metrics_port > 0 else None
+    else:
+        effective_port = (
+            config.environments.metrics_port
+            if config.environments.metrics_port > 0
+            else None
+        )
+    metrics = Metrics(port=effective_port)
     health = HealthChecker()
     alerts = ConsoleAlertSink()
 
@@ -90,7 +102,9 @@ def build_services(
     pnl_calc = PnLCalculator(config.instruments)
     exposure_calc = ExposureCalculator(config.instruments)
     working = WorkingOrderBook()
-    idempotency = IdempotencyStore()
+    # SQLite-backed dedupe persists claimed keys so a restart cannot resubmit
+    # an order that was already accepted before the crash.
+    idempotency = IdempotencyStore(backend=SqliteIdempotencyBackend(db))
 
     order_manager = OrderManager(positions, working, idempotency)
     kill_switch = KillSwitch(armed=config.risk_limits.kill_switch_armed)

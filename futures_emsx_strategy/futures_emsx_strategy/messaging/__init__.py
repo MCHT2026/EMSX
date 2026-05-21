@@ -1,10 +1,21 @@
 """Pub/sub bus. In-memory for single-process; Kafka/Redis for multi-service."""
 from .bus import EventBus
+from .codec import decode, encode, register_topic, topic_type
 from .in_memory_bus import InMemoryBus
 from .kafka_bus import KafkaBus
 from .redis_bus import RedisStreamBus
 
-__all__ = ["EventBus", "InMemoryBus", "KafkaBus", "RedisStreamBus"]
+__all__ = [
+    "EventBus",
+    "InMemoryBus",
+    "KafkaBus",
+    "RedisStreamBus",
+    "decode",
+    "encode",
+    "make_bus",
+    "register_topic",
+    "topic_type",
+]
 
 
 def make_bus(kind: str, url: str | None = None) -> EventBus:
