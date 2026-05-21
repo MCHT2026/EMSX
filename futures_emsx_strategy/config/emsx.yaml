@@ -1,0 +1,11 @@
+host: "localhost"
+port: 8194
+service: "//blp/emapisvc_beta"
+use_server_api: true
+trader_uuid: null
+account: null
+broker: "BMTB"
+handling_instruction: "ANY"
+strategy: "VWAP"
+default_order_type: "MKT"
+default_tif: "DAY"

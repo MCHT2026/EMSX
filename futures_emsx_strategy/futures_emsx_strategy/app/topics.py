@@ -1,0 +1,10 @@
+"""Canonical topic names. Used by every service on the bus."""
+
+TICKS = "ticks"
+BARS = "bars"
+TARGETS = "targets"
+INTENTS = "intents"
+RISK_DECISIONS = "risk_decisions"
+EXECUTION_UPDATES = "execution_updates"
+FILLS = "fills"
+KILL_SWITCH = "kill_switch"

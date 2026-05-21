@@ -1,0 +1,24 @@
+strategies:
+  - strategy_id: "minute_es_v1"
+    type: "minute_momentum"
+    instrument: "ESM6 Index"
+    interval_minutes: 1
+    base_qty: 5
+    params:
+      fast_lookback: 5
+      slow_lookback: 20
+      entry_threshold: 0.0
+      exit_threshold: 0.0
+      max_position_contracts: 8
+
+  - strategy_id: "minute_nq_v1"
+    type: "minute_momentum"
+    instrument: "NQM6 Index"
+    interval_minutes: 1
+    base_qty: 2
+    params:
+      fast_lookback: 5
+      slow_lookback: 20
+      entry_threshold: 0.0
+      exit_threshold: 0.0
+      max_position_contracts: 4

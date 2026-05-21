@@ -1,0 +1,12 @@
+provider: "bloomberg"
+host: "localhost"
+port: 8194
+service: "//blp/mktdata"
+historical_service: "//blp/refdata"
+fields:
+  - "BID"
+  - "ASK"
+  - "LAST_PRICE"
+  - "VOLUME"
+  - "EVT_TIME_STAMP"
+bar_interval_minutes: 1

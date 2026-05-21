@@ -1,0 +1,7 @@
+name: "dev"
+paper_trading: true
+db_url: "sqlite:///fes.db"
+event_log_path: "./.logs/events.jsonl"
+bus: "memory"
+bus_url: null
+metrics_port: 9100

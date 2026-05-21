@@ -1,0 +1,39 @@
+instruments:
+  - symbol: "ESM6 Index"
+    bloomberg_topic: "ESM6 Index"
+    exchange: "CME"
+    currency: "USD"
+    tick_size: 0.25
+    point_value: 50.0
+    min_qty: 1
+    max_qty: 50
+    roll_days_before_expiry: 8
+    session_tz: "America/Chicago"
+    session_open: "08:30"
+    session_close: "15:15"
+
+  - symbol: "NQM6 Index"
+    bloomberg_topic: "NQM6 Index"
+    exchange: "CME"
+    currency: "USD"
+    tick_size: 0.25
+    point_value: 20.0
+    min_qty: 1
+    max_qty: 30
+    roll_days_before_expiry: 8
+    session_tz: "America/Chicago"
+    session_open: "08:30"
+    session_close: "15:15"
+
+  - symbol: "CLM6 Comdty"
+    bloomberg_topic: "CLM6 Comdty"
+    exchange: "NYMEX"
+    currency: "USD"
+    tick_size: 0.01
+    point_value: 1000.0
+    min_qty: 1
+    max_qty: 20
+    roll_days_before_expiry: 5
+    session_tz: "America/New_York"
+    session_open: "09:00"
+    session_close: "14:30"

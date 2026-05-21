@@ -1,0 +1,8 @@
+max_order_qty: 20
+max_position: 50
+max_notional: 5000000.0
+max_orders_per_minute: 10
+max_cancels_per_minute: 20
+stale_data_seconds: 30
+require_market_session: true
+kill_switch_armed: true

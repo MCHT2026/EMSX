@@ -1,0 +1,1459 @@
+% futures_emsx_strategy — API Contracts
+% Compile: pdflatex contracts.tex (twice for ToC)
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[margin=0.9in]{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{fancyhdr}
+
+% parskip emulation (no extra package required)
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em plus 0.1em minus 0.1em}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!55!black,
+  urlcolor=blue!55!black,
+  citecolor=blue!55!black,
+  pdftitle={futures\_emsx\_strategy API Contracts},
+  pdfauthor={futures\_emsx\_strategy}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small futures\_emsx\_strategy --- API Contracts}
+\fancyhead[R]{\small \thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\definecolor{kw}{HTML}{0033B3}
+\definecolor{str}{HTML}{067D17}
+\definecolor{cm}{HTML}{8C8C8C}
+\definecolor{bg}{HTML}{FAFAFA}
+
+\lstdefinelanguage{Pythonish}{
+  morekeywords={class,def,return,raise,yield,if,else,elif,for,in,not,or,and,
+                with,as,from,import,True,False,None,async,await,self,lambda,
+                try,except,finally,is,pass,break,continue,global,nonlocal},
+  morestring=[b]",morestring=[b]',
+  morecomment=[l]\#,
+  sensitive=true,
+}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  language=Pythonish,
+  keywordstyle=\color{kw}\bfseries,
+  stringstyle=\color{str},
+  commentstyle=\color{cm}\itshape,
+  backgroundcolor=\color{bg},
+  breaklines=true,
+  showstringspaces=false,
+  columns=fullflexible,
+  keepspaces=true,
+  frame=single,
+  framesep=4pt,
+  rulecolor=\color{black!20},
+  belowskip=4pt,
+  aboveskip=4pt,
+}
+
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\Cls}[1]{\textbf{\texttt{\detokenize{#1}}}}
+\newcommand{\Fn}[1]{\texttt{\detokenize{#1}}}
+
+% Compact contract block built from xcolor primitives only.
+\definecolor{cbox}{HTML}{1F3A93}
+\definecolor{cboxbg}{HTML}{F2F6FF}
+
+\newenvironment{contractbox}[1]{%
+  \par\vspace{6pt}\noindent
+  \begingroup
+    \setlength{\fboxsep}{4pt}%
+    \colorbox{cbox}{\color{white}\bfseries\small\strut\quad #1\quad}\par
+  \endgroup
+  \vspace{2pt}\noindent\hspace*{0.5em}%
+  \begin{minipage}{\dimexpr\linewidth-0.5em\relax}\small
+}{%
+  \end{minipage}\par\vspace{4pt}%
+  \noindent\textcolor{cbox}{\rule{\linewidth}{0.3pt}}\par\vspace{4pt}%
+}
+
+\setlist[description]{leftmargin=8em,style=nextline,font=\bfseries}
+
+\title{\textbf{futures\_emsx\_strategy}\\[2pt]\large API \& Component Contracts}
+\author{Reference documentation}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\clearpage
+
+% =====================================================================
+\section{Overview}
+
+\subsection{Architectural contract}
+
+The system is partitioned so each layer depends only on the layer above it on the event flow, never the other way:
+
+\begin{lstlisting}
+Bloomberg market data
+    -->  Market Data Service     (ticks, bars)
+    -->  Strategy                 (TargetPosition)
+    -->  Order Manager            (OrderIntent)
+    -->  Pre-Trade Risk Gateway   (RiskDecision)
+    -->  Execution Adapter        (ExecutionAck)
+    -->  EMSX                     (route updates, fills)
+    -->  Portfolio & Reconciler   (PositionBook, FillLedger, PnL)
+\end{lstlisting}
+
+\textbf{Hard rules:}
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item Strategies emit only \Cls{TargetPosition}. They never construct orders, never call EMSX, never know about routes.
+  \item Order intents pass through \Cls{PreTradeRiskGateway} before reaching any \Cls{ExecutionAdapter}.
+  \item Execution adapters are the only modules that import \code{blpapi}. Other layers work without it.
+  \item Every \Cls{OrderIntent} has a deterministic \code{idempotency_key} (SHA-1 of strategy + instrument + bar-end + side + qty), so replays and restarts cannot duplicate orders.
+\end{itemize}
+
+\subsection{Event types (canonical)}
+
+\begin{tabular}{@{}lll@{}}
+\toprule
+Event & Producer & Consumer(s) \\
+\midrule
+\code{MarketTick}      & Market data service             & Bar builder, tick store, stale monitor \\
+\code{BarClosed}       & Bar builder                     & Strategy \\
+\code{TargetPosition}  & Strategy                        & Order manager \\
+\code{OrderIntent}     & Order manager                   & Risk gateway \\
+\code{RiskDecision}    & Risk gateway                    & Execution service \\
+\code{ExecutionAck}    & Execution adapter (sync)        & Order lifecycle \\
+\code{ExecutionUpdate} & Execution adapter (async subs)  & Lifecycle, working book, monitoring \\
+\code{FillUpdate}      & Execution adapter (async subs)  & Position book, PnL, fill ledger \\
+\code{KillSwitchEvent} & Kill switch                     & All services (refuse to trade) \\
+\bottomrule
+\end{tabular}
+
+\subsection{Notation used in this document}
+
+Each entry contains:
+
+\begin{description}[leftmargin=6em]
+  \item[Purpose]   one-line summary.
+  \item[Signature] full Python signature.
+  \item[Pre]       caller-side preconditions.
+  \item[Post]      observable effects after a successful call.
+  \item[Raises]    exceptions raised.
+\end{description}
+
+When an item has no preconditions worth stating, the \textbf{Pre} field is omitted.
+
+\clearpage
+% =====================================================================
+\section{Module \texttt{core/}}
+
+Foundational primitives: clocks, canonical events, enums, exceptions, identifiers, logging.
+
+% ---------------------------------------------------------------------
+\subsection{\texttt{core.clock}}
+
+\begin{contractbox}{\Cls{Clock} (abstract)}
+\begin{description}
+\item[Purpose]   Time source. Decouples wall-clock from simulation/replay.
+\item[Signature] \lstinline|class Clock(ABC):  def now(self) -> datetime|
+\item[Post]      Returns timezone-aware UTC \code{datetime}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{SystemClock}}
+\begin{description}
+\item[Purpose]   Wall-clock implementation.
+\item[Signature] \lstinline|class SystemClock(Clock): def now(self) -> datetime|
+\item[Post]      \code{now()} returns \code{datetime.now(timezone.utc)}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{FixedClock}}
+\begin{description}
+\item[Purpose]   Returns a single fixed time. Used in deterministic unit tests.
+\item[Signature] \lstinline|class FixedClock(Clock): __init__(fixed: datetime) ; set(t: datetime) -> None|
+\item[Pre]       \code{fixed} must be tz-aware.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{SimulatedClock}}
+\begin{description}
+\item[Purpose]   Monotonic clock for backtests.
+\item[Signature] \lstinline|class SimulatedClock(Clock): __init__(start: datetime) ; advance_to(t: datetime) -> None|
+\item[Pre]       \code{advance_to(t)} requires \code{t} $\ge$ current internal time.
+\item[Post]      Internal time is set to \code{t}.
+\item[Raises]    \code{ValueError} if \code{t} would rewind time.
+\end{description}
+\end{contractbox}
+
+% ---------------------------------------------------------------------
+\subsection{\texttt{core.enums}}
+
+\begin{contractbox}{\Cls{Side} (\code{BUY}, \code{SELL})}
+\begin{description}
+\item[Purpose]   Order side; carries arithmetic sign for position math.
+\item[Signature] \lstinline|side.sign -> int   # +1 for BUY, -1 for SELL|
+\item[Signature] \lstinline|Side.from_delta(delta: int) -> Side|
+\item[Raises]    \code{ValueError} when \code{delta == 0}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{OrderType}}
+\begin{description}
+\item[Members]   \code{MKT, LMT, STP, STP_LMT}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{TimeInForce}}
+\begin{description}
+\item[Members]   \code{DAY, GTC, IOC, FOK, GTD}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{OrderStatus}}
+\begin{description}
+\item[Purpose]   Venue-neutral lifecycle status, mapped from EMSX route status.
+\item[Members]   \code{NEW, RISK_APPROVED, RISK_REJECTED, SENT, ACCEPTED, WORKING,}
+                 \code{PART_FILLED, FILLED, CANCEL_PENDING, CANCELLED,}
+                 \code{MODIFY_PENDING, REJECTED, ROUTE_ERR, UNKNOWN}.
+\item[Const]     \code{TERMINAL_ORDER_STATUSES = \{FILLED, CANCELLED, REJECTED, ROUTE_ERR\}}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{RouteStatus}, \Cls{KillSwitchState}}
+\begin{description}
+\item[\code{RouteStatus}] Mirror of EMSX route status strings: \code{SENT, WORKING, PARTFILLED, FILLED, CANCEL, REJECTED, ROUTE-ERR}.
+\item[\code{KillSwitchState}] \code{ARMED} (trading allowed) or \code{TRIPPED} (all orders rejected).
+\end{description}
+\end{contractbox}
+
+% ---------------------------------------------------------------------
+\subsection{\texttt{core.exceptions}}
+
+All custom exceptions inherit \Cls{FESError}. Layer-specific subclasses:
+
+\begin{description}[leftmargin=10em]
+  \item[\Cls{ConfigError}]          invalid or missing config.
+  \item[\Cls{MarketDataError}]      market-data session/subscription failure.
+  \item[\Cls{StaleMarketDataError}] subclass for staleness specifically.
+  \item[\Cls{StrategyError}]        strategy invariant violation.
+  \item[\Cls{OrderError}]           bad order intent.
+  \item[\Cls{DuplicateOrderError}]  re-submission of a known idempotency key.
+  \item[\Cls{RiskRejection}]        raised when a hard check fails; \code{.reasons: list[str]}.
+  \item[\Cls{ExecutionError}]       generic venue error.
+  \item[\Cls{EMSXError}]            EMSX-specific.
+  \item[\Cls{ReconciliationBreak}]  internal vs. external positions disagree.
+\end{description}
+
+% ---------------------------------------------------------------------
+\subsection{\texttt{core.identifiers}}
+
+\begin{contractbox}{\Fn{new_uuid}, \Fn{correlation_id}}
+\begin{description}
+\item[Signature] \lstinline|new_uuid() -> str|
+\item[Signature] \lstinline|correlation_id(prefix: str = "corr") -> str|
+\item[Post]      Returns globally unique strings.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Fn{idempotency_key}}
+\begin{description}
+\item[Purpose]   Deterministic key used by \Cls{OrderManager} to dedupe submissions.
+\item[Signature] \lstinline|idempotency_key(strategy_id: str, instrument: str, bar_end: datetime, side: str, qty: int) -> str|
+\item[Post]      Same inputs $\Rightarrow$ same key (SHA-1, truncated). Replays produce identical keys.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Fn{emsx_request_id}}
+\begin{description}
+\item[Signature] \lstinline|emsx_request_id(order_id: str, action: str) -> str|
+\item[Post]      Unique correlation tag for an EMSX request.
+\end{description}
+\end{contractbox}
+
+% ---------------------------------------------------------------------
+\subsection{\texttt{core.logging}}
+
+\begin{contractbox}{\Fn{configure_logging}, \Fn{get_logger}}
+\begin{description}
+\item[Signature] \lstinline|configure_logging(level: str = "INFO", json: bool = True) -> None|
+\item[Signature] \lstinline|get_logger(name: str) -> structlog.BoundLogger|
+\item[Post]      All logs are structured (key/value), ISO-8601 UTC timestamped, level-filtered.
+\end{description}
+\end{contractbox}
+
+% ---------------------------------------------------------------------
+\subsection{\texttt{core.events}}
+
+All events are frozen \code{@dataclass(slots=True, frozen=True)}; immutable across the bus.
+
+\begin{contractbox}{\Cls{MarketTick}}
+\begin{description}
+\item[Fields] \code{instrument, bid?, ask?, last?, volume?, exchange_timestamp?, receive_timestamp}.
+\item[Note]   \code{?} = optional. \code{receive_timestamp} is always set by the provider.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{BarClosed}}
+\begin{description}
+\item[Fields] \code{instrument, start_time, end_time, open, high, low, close, volume, interval_minutes=1}.
+\item[Invariant] \code{low <= open,close <= high}; \code{end_time > start_time}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{TargetPosition}}
+\begin{description}
+\item[Fields] \code{strategy_id, instrument, target_qty: int, timestamp, reason, metadata}.
+\item[Invariant] \code{target_qty} is signed; positive means net long.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{OrderIntent}}
+\begin{description}
+\item[Fields] \code{strategy_id, instrument, side, qty (>0), order_type, time_in_force,}\\
+              \code{idempotency_key, source_timestamp, limit_price?, stop_price?, metadata}.
+\item[Invariant] \code{qty > 0}. Direction lives in \code{side}, not the sign of \code{qty}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{RiskDecision}}
+\begin{description}
+\item[Fields]    \code{order_key, approved: bool, reasons: tuple[str,...], decided_at}.
+\item[Factories] \code{RiskDecision.approve(order_key, decided_at)}, \code{RiskDecision.reject(order_key, reasons, decided_at)}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{ExecutionAck}, \Cls{ExecutionUpdate}, \Cls{FillUpdate}, \Cls{KillSwitchEvent}}
+\begin{description}
+\item[\Cls{ExecutionAck}]    Synchronous response of \code{submit/cancel/modify}: \code{order_id, route_id?, venue_request_id?, accepted: bool, message, timestamp}.
+\item[\Cls{ExecutionUpdate}] Async push from venue subscription: \code{order_id, route_id?, instrument, status (OrderStatus), filled_qty, avg_price?, leaves_qty, timestamp, raw}.
+\item[\Cls{FillUpdate}]      A trade execution: \code{order_id, route_id?, instrument, side, fill_qty, fill_price, timestamp}.
+\item[\Cls{KillSwitchEvent}] \code{tripped, reason, timestamp, actor}.
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Module \texttt{config/}}
+
+Strongly typed pydantic models loaded from six YAML files under \code{config/}.
+
+\begin{contractbox}{\Fn{load_yaml}, \Fn{load_app_config}}
+\begin{description}
+\item[Signature] \lstinline|load_yaml(path: str | Path) -> dict[str, Any]|
+\item[Signature] \lstinline|load_app_config(config_dir: str | Path) -> AppConfig|
+\item[Pre]       \code{config_dir} contains all six YAMLs (\code{instruments, strategies, risk_limits, emsx, market_data, environments}).
+\item[Post]      Returns validated \Cls{AppConfig}; raises \Cls{ConfigError} on missing/invalid files.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{InstrumentConfig}}
+\begin{description}
+\item[Fields]    \code{symbol, bloomberg_topic, exchange, currency, tick_size, point_value,}\\
+                 \code{min_qty, max_qty, roll_days_before_expiry, session_tz, session_open, session_close}.
+\item[Invariant] \code{tick_size, point_value > 0}; \code{1 <= min_qty <= max_qty}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{InstrumentsConfig}}
+\begin{description}
+\item[Signature] \lstinline|by_symbol(symbol: str) -> InstrumentConfig|
+\item[Raises]    \Cls{ConfigError} if symbol not configured.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{StrategyConfig}, \Cls{StrategiesConfig}}
+\begin{description}
+\item[\Cls{StrategyConfig}] \code{strategy_id, type, instrument, interval_minutes=1, base_qty=1, params: dict}.
+\item[\Cls{StrategiesConfig}] holds \code{strategies: list[StrategyConfig]}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{RiskLimitsConfig}}
+\begin{description}
+\item[Fields] \code{max_order_qty, max_position, max_notional, max_orders_per_minute=10,}\\
+              \code{max_cancels_per_minute=20, stale_data_seconds=30, require_market_session=true,}\\
+              \code{kill_switch_armed=true}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{EMSXConfig}}
+\begin{description}
+\item[Fields] \code{host="localhost", port=8194, service="//blp/emapisvc_beta", use_server_api=True,}\\
+              \code{trader_uuid?, account?, broker="BMTB", handling_instruction="ANY",}\\
+              \code{strategy="VWAP", default_order_type="MKT", default_tif="DAY"}.
+\item[Invariant] \code{service} must start with \code{//blp/}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{MarketDataConfig}, \Cls{EnvironmentsConfig}, \Cls{AppConfig}}
+\begin{description}
+\item[\Cls{MarketDataConfig}]  \code{provider, host, port, service, fields, historical_service, bar_interval_minutes}.
+\item[\Cls{EnvironmentsConfig}] \code{name, paper_trading, db_url, event_log_path, bus, bus_url?, metrics_port}.
+\item[\Cls{AppConfig}]          aggregate of all six configs.
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Module \texttt{market\_data/}}
+
+\subsection{\texttt{market\_data.base}}
+
+\begin{contractbox}{\Cls{MarketDataProvider} (abstract)}
+\begin{description}
+\item[Purpose] The single seam that decouples the strategy from Bloomberg. All implementations conform to this interface.
+\item[Signature] \begin{lstlisting}
+class MarketDataProvider(ABC):
+    def start(self) -> None
+    def stop(self) -> None
+    def subscribe(self, instruments: list[str], fields: list[str]) -> None
+    def on_tick(self, callback: Callable[[MarketTick], None]) -> None
+    def request_historical_bars(self, instrument, start, end, interval_minutes=1) -> Iterable[BarClosed]
+\end{lstlisting}
+\item[Contract]
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item \code{start} initializes the session. Must be called before \code{subscribe}.
+  \item \code{subscribe} is idempotent: re-subscribing the same instrument has no effect.
+  \item \code{on_tick} callbacks are invoked once per \code{MarketTick} in arrival order; exceptions in callbacks must not kill the provider thread.
+  \item \code{stop} releases the session; further calls are no-ops.
+\end{itemize}
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{market\_data.bloomberg\_provider}}
+
+\begin{contractbox}{\Cls{BloombergMarketDataProvider}}
+\begin{description}
+\item[Purpose] BLPAPI implementation of \Cls{MarketDataProvider}. Threaded event loop pulls events from the session and dispatches \code{SUBSCRIPTION_DATA} events to callbacks.
+\item[Signature] \begin{lstlisting}
+__init__(host="localhost", port=8194,
+         service="//blp/mktdata",
+         historical_service="//blp/refdata")
+\end{lstlisting}
+\item[Pre]    \code{blpapi} is installed; reachable Bloomberg session (Desktop API, SAPI, or B-PIPE).
+\item[Raises] \Cls{MarketDataError} if session start or service open fails, or if \code{blpapi} is missing.
+\item[Fields supported] \code{BID, ASK, LAST_PRICE, VOLUME, EVT_TIME_STAMP} (any subset).
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{market\_data.mock\_provider}}
+
+\begin{contractbox}{\Cls{MockMarketDataProvider}}
+\begin{description}
+\item[Purpose] Test and paper-trading replacement; ticks are pushed manually.
+\item[Signature] \lstinline|push_tick(tick: MarketTick) -> None|
+\item[Signature] \lstinline|MockMarketDataProvider.tick(instrument, last, ts=None, volume=1) -> MarketTick|
+\item[Post]    Synchronously delivers the tick to every registered callback.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{market\_data.bar\_builder}}
+
+\begin{contractbox}{\Cls{MinuteBarBuilder}}
+\begin{description}
+\item[Purpose] Streaming OHLCV aggregator. Closes the current bar deterministically when a tick crosses into the next minute (or \code{flush()} is called).
+\item[Signature] \begin{lstlisting}
+__init__(interval_minutes: int = 1)
+on_tick(tick: MarketTick) -> None
+on_bar(callback: Callable[[BarClosed], None]) -> None
+flush(instrument: str | None = None) -> None
+\end{lstlisting}
+\item[Contract]
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item \code{on_tick} uses \code{exchange_timestamp} when present, else \code{receive_timestamp}.
+  \item Price source order: \code{last} $\to$ mid of \code{(bid,ask)}; tick is dropped if neither is available.
+  \item Bars emitted only when a strictly later minute arrives. Use \code{flush} at shutdown to emit pending bars.
+\end{itemize}
+\item[Raises] \code{ValueError} if \code{interval_minutes <= 0}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{market\_data.tick\_store}}
+
+\begin{contractbox}{\Cls{InMemoryTickStore}}
+\begin{description}
+\item[Purpose] Bounded per-instrument ring buffer of recent ticks (default 1024).
+\item[Signature] \begin{lstlisting}
+append(tick: MarketTick) -> None
+last(instrument: str) -> MarketTick | None
+recent(instrument: str, n: int = 100) -> list[MarketTick]
+instruments() -> list[str]
+\end{lstlisting}
+\item[Concurrency] All operations are thread-safe.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{market\_data.contract\_resolver}}
+
+\begin{contractbox}{\Cls{ContractResolver}}
+\begin{description}
+\item[Purpose] Resolves logical symbols to active contracts and decides when to roll.
+\item[Signature] \begin{lstlisting}
+resolve(symbol: str, as_of: date | None = None) -> InstrumentConfig
+should_roll(ins: InstrumentConfig, as_of: date, expiry: date) -> bool
+known_symbols() -> list[str]
+validate(symbol: str) -> None    # raises ConfigError if unknown
+\end{lstlisting}
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{market\_data.stale\_data\_monitor}}
+
+\begin{contractbox}{\Cls{StaleDataMonitor}}
+\begin{description}
+\item[Purpose] Tracks the freshness of incoming ticks; consumed by \Cls{PreTradeRiskGateway}.
+\item[Signature] \begin{lstlisting}
+__init__(max_age_seconds: int, clock: Clock | None = None)
+on_tick(tick: MarketTick) -> None
+last_seen(instrument: str) -> datetime | None
+is_stale(instrument: str) -> bool
+age_seconds(instrument: str) -> float | None
+\end{lstlisting}
+\item[Contract]
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item An instrument that has never been seen is stale.
+  \item Naive timestamps are treated as UTC for the age computation.
+\end{itemize}
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Module \texttt{strategy/}}
+
+\subsection{\texttt{strategy.base}}
+
+\begin{contractbox}{\Cls{PortfolioView} (Protocol)}
+\begin{description}
+\item[Purpose] Read-only window the strategy is allowed to see.
+\item[Signature] \begin{lstlisting}
+class PortfolioView(Protocol):
+    def position(self, instrument: str) -> int
+    def avg_cost(self, instrument: str) -> float | None
+\end{lstlisting}
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Cls{Strategy} (abstract)}
+\begin{description}
+\item[Purpose] Consumes bars, emits target positions. Pure logic; no I/O.
+\item[Signature] \begin{lstlisting}
+class Strategy(ABC):
+    strategy_id: str
+    def on_bar(self, bar: BarClosed, portfolio: PortfolioView) -> list[TargetPosition]
+    def warmup(self, bars: list[BarClosed]) -> None    # optional
+\end{lstlisting}
+\item[Contract]
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item \code{on_bar} must be pure with respect to external state apart from the strategy's own indicator state.
+  \item Targets returned must reference \code{bar.instrument} or any instrument the strategy declared at init.
+\end{itemize}
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{strategy.indicators}}
+
+\begin{contractbox}{\Cls{SMA}, \Cls{EMA}, \Cls{RollingZ}}
+\begin{description}
+\item[\Cls{SMA}] \code{__init__(period: int)}; \code{update(x: float) -> float | None}; \code{ready: bool}. Returns \code{None} until \code{period} observations have been seen.
+\item[\Cls{EMA}] Same shape; smoothing factor $\alpha = 2/(period+1)$.
+\item[\Cls{RollingZ}] \code{__init__(period >= 2)}; returns \code{0.0} when sample stdev is zero, else $(x - \mu)/\sigma$.
+\item[Raises] \code{ValueError} for non-positive periods.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{strategy.signal\_state}}
+
+\begin{contractbox}{\Cls{SignalState}}
+\begin{description}
+\item[Purpose] Bundles fast/slow \Cls{EMA} indicators into one object.
+\item[Signature] \begin{lstlisting}
+SignalState(fast_lookback: int, slow_lookback: int)
+update(close: float) -> float | None   # fast - slow, None until both ready
+ready: bool
+\end{lstlisting}
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{strategy.target\_position}}
+
+\begin{contractbox}{\Fn{build_target_position}}
+\begin{description}
+\item[Purpose] Pure function: signal $\to$ \Cls{TargetPosition}.
+\item[Signature] \begin{lstlisting}
+build_target_position(
+    strategy_id: str, instrument: str, signal: float,
+    timestamp: datetime, base_qty: int,
+    entry_threshold: float = 0.0, exit_threshold: float = 0.0,
+    max_position: int | None = None,
+) -> TargetPosition
+\end{lstlisting}
+\item[Behaviour] \code{signal > entry_threshold} $\Rightarrow$ \code{+base_qty}; \code{signal < -entry_threshold} $\Rightarrow$ \code{-base_qty}; otherwise \code{0}. Clipped to \code{[-max_position, +max_position]} if given.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{strategy.minute\_strategy}}
+
+\begin{contractbox}{\Cls{MinuteFuturesStrategy}}
+\begin{description}
+\item[Purpose] Reference EMA-crossover strategy on minute bars.
+\item[Signature] \begin{lstlisting}
+MinuteFuturesStrategy(strategy_id: str, instrument: str,
+                     base_qty: int, params: dict | None = None)
+\end{lstlisting}
+\item[Params keys] \code{fast_lookback (default 5), slow_lookback (default 20), entry_threshold, exit_threshold, max_position_contracts}.
+\item[Post] Each \code{on_bar} call returns either \code{[]} (warmup) or one \Cls{TargetPosition} for \code{self.instrument}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{strategy.roll\_logic}}
+
+\begin{contractbox}{\Cls{RollLogic}}
+\begin{description}
+\item[Signature] \begin{lstlisting}
+RollLogic(instrument: InstrumentConfig)
+evaluate(active_contract: str, next_contract: str,
+         active_expiry: date, as_of: date) -> RollDecision
+\end{lstlisting}
+\item[\Cls{RollDecision}] \code{should_roll, from_contract, to_contract?, reason}.
+\item[Rule] Roll when \code{(expiry - as_of).days <= roll_days_before_expiry}.
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Module \texttt{portfolio/}}
+
+\subsection{\texttt{portfolio.positions}}
+
+\begin{contractbox}{\Cls{PositionBook}}
+\begin{description}
+\item[Purpose] Authoritative in-memory net position + weighted-average cost per instrument. Updated by fills.
+\item[Signature] \begin{lstlisting}
+position(instrument: str) -> int
+avg_cost(instrument: str) -> float | None
+apply_fill(fill: FillUpdate) -> None
+snapshot() -> dict[str, tuple[int, float]]   # symbol -> (qty, avg_cost)
+set(instrument: str, qty: int, avg_cost: float = 0.0) -> None
+is_flat(instrument: str) -> bool
+\end{lstlisting}
+\item[Avg-cost rule]
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item Adding to an existing position $\Rightarrow$ weighted average.
+  \item Reducing $\Rightarrow$ avg unchanged unless flipped.
+  \item Flipping side $\Rightarrow$ new avg = fill price.
+\end{itemize}
+\item[Concurrency] Thread-safe (internal lock).
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{portfolio.fills}}
+
+\begin{contractbox}{\Cls{FillLedger}}
+\begin{description}
+\item[Purpose] Append-only fill record, indexed by \code{order_id}.
+\item[Signature] \begin{lstlisting}
+record(fill: FillUpdate) -> None
+for_order(order_id: str) -> list[FillUpdate]
+all() -> list[FillUpdate]
+total_filled(order_id: str) -> int
+\end{lstlisting}
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{portfolio.pnl}}
+
+\begin{contractbox}{\Cls{PnLCalculator}}
+\begin{description}
+\item[Purpose] Realized PnL on closing trades + unrealized PnL against a mark map. Uses each instrument's \code{point_value}.
+\item[Signature] \begin{lstlisting}
+__init__(instruments: InstrumentsConfig)
+apply_fill(fill: FillUpdate) -> None
+realized() -> float
+unrealized(marks: dict[str, float]) -> float
+snapshot(marks: dict[str, float]) -> PnLSnapshot   # (realized, unrealized, total)
+\end{lstlisting}
+\item[Math] On closing $n$ contracts of a long at avg $\bar p$ at price $p$: realized $+= n \cdot (p - \bar p) \cdot \text{pointValue}$.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{portfolio.exposure}}
+
+\begin{contractbox}{\Cls{ExposureCalculator}}
+\begin{description}
+\item[Signature] \begin{lstlisting}
+notional(instrument: str, qty: int, price: float) -> float
+gross_notional(positions: PositionBook, marks: dict[str, float]) -> float
+per_instrument(positions, marks) -> list[Exposure]
+\end{lstlisting}
+\item[Formula] $\text{notional} = |qty| \cdot \text{price} \cdot \text{pointValue}$.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{portfolio.reconciliation}}
+
+\begin{contractbox}{\Cls{Reconciler}}
+\begin{description}
+\item[Signature] \begin{lstlisting}
+compare(external_positions: dict[str, int]) -> list[PositionBreak]
+force_resync(external_positions: dict[str, int]) -> None
+\end{lstlisting}
+\item[\Cls{PositionBreak}] \code{instrument, internal_qty, external_qty}; computed \code{delta = external - internal}.
+\item[Note] \code{force_resync} is destructive and trusts the external source --- requires explicit operator approval.
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Module \texttt{orders/}}
+
+\subsection{\texttt{orders.models}}
+
+\begin{contractbox}{\Cls{WorkingOrderBook}}
+\begin{description}
+\item[Purpose] Net signed working quantity per instrument across all open orders. Consumed by \Cls{OrderManager} to avoid double-sending.
+\item[Signature] \begin{lstlisting}
+upsert(order_id, instrument, side, leaves_qty, status) -> None
+remove(order_id: str) -> None
+net_working_qty(instrument: str) -> int   # signed
+snapshot() -> list[tuple[order_id, sym, Side, qty, OrderStatus]]
+\end{lstlisting}
+\item[Auto-removal] Terminal statuses (\code{FILLED, CANCELLED, REJECTED, ROUTE_ERR}) or \code{leaves_qty<=0} remove the row.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{orders.idempotency}}
+
+\begin{contractbox}{\Cls{IdempotencyBackend} (protocol), \Cls{IdempotencyStore}}
+\begin{description}
+\item[\Cls{IdempotencyStore}] \begin{lstlisting}
+seen(key: str) -> bool
+mark(key: str) -> None
+claim(key: str) -> bool    # True iff key was new (and is now marked)
+\end{lstlisting}
+\item[Default backend] In-memory; swap in a Redis/SQL backend by passing an alternate \Cls{IdempotencyBackend}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{orders.throttles}}
+
+\begin{contractbox}{\Cls{RateLimiter}}
+\begin{description}
+\item[Purpose] Sliding-window event limiter (e.g. orders/minute).
+\item[Signature] \begin{lstlisting}
+__init__(max_events: int, window_seconds: int, clock: Clock | None = None)
+try_acquire() -> bool      # True if event accepted
+current() -> int           # events currently in window
+\end{lstlisting}
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{orders.sizing}}
+
+\begin{contractbox}{\Fn{slice_order}}
+\begin{description}
+\item[Purpose] Break a large parent qty into child clips.
+\item[Signature] \lstinline|slice_order(total_qty: int, max_clip: int) -> list[int]|
+\item[Post]    \code{sum(result) == total_qty}; \code{all(c <= max_clip)}; returns \code{[]} when \code{total_qty <= 0}.
+\item[Raises]  \code{ValueError} when \code{max_clip <= 0}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{orders.lifecycle}}
+
+\begin{contractbox}{\Cls{OrderRecord}, \Cls{OrderLifecycle}}
+\begin{description}
+\item[\Cls{OrderRecord}] \code{order_id, strategy_id, instrument, side, qty, idempotency_key,}\\
+                        \code{created_at, status, venue_order_id?, route_id?, filled_qty=0, avg_price?, last_update?, reasons[]}.
+\item[\Cls{OrderLifecycle}] \begin{lstlisting}
+register(rec: OrderRecord) -> None
+get(order_id: str) -> OrderRecord | None
+update_status(order_id, status, filled_qty?, avg_price?,
+              venue_order_id?, route_id?, timestamp?) -> OrderRecord | None
+all() -> list[OrderRecord]
+by_venue_id(venue_order_id: str) -> OrderRecord | None
+\end{lstlisting}
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{orders.order\_manager}}
+
+\begin{contractbox}{\Cls{OrderManager}}
+\begin{description}
+\item[Purpose] Pure deduplicating mapping \Cls{TargetPosition} $\to$ list\ of \Cls{OrderIntent}.
+\item[Signature] \begin{lstlisting}
+__init__(positions: PositionBook, working: WorkingOrderBook,
+         idempotency: IdempotencyStore,
+         default_order_type: OrderType = OrderType.MKT,
+         default_tif: TimeInForce = TimeInForce.DAY,
+         max_clip: int | None = None)
+
+on_target(target: TargetPosition) -> list[OrderIntent]
+\end{lstlisting}
+\item[Algorithm]
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+  \item $\Delta = \text{target.target\_qty} - \text{position} - \text{net working qty}$.
+  \item If $\Delta = 0$, return \code{[]}.
+  \item Otherwise \code{side = Side.from_delta(}$\Delta$\code{)}, \code{qty = |}$\Delta$\code{|}.
+  \item Optionally slice with \code{max_clip}.
+  \item For each clip, compute a deterministic \code{idempotency_key}; submit only if \code{idempotency.claim(key)} returns \code{True}.
+\end{enumerate}
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Module \texttt{risk/}}
+
+\subsection{\texttt{risk.limits}}
+
+\begin{contractbox}{\Cls{RiskLimits}}
+\begin{description}
+\item[Purpose] Frozen dataclass mirror of \Cls{RiskLimitsConfig} used by the gateway.
+\item[Fields]   \code{max_order_qty, max_position, max_notional, stale_data_seconds,}\\
+                \code{require_market_session, max_orders_per_minute, max_cancels_per_minute}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{risk.validations}}
+
+\begin{contractbox}{\Cls{ValidationCheck}}
+\begin{description}
+\item[Purpose]   Reusable pass/fail check result.
+\item[Signature] \lstinline|ValidationCheck.ok(name)| / \lstinline|ValidationCheck.fail(name, reason)|.
+\item[Fields]    \code{name, passed: bool, reason: str}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{risk.session\_checks}}
+
+\begin{contractbox}{\Cls{SessionChecker}}
+\begin{description}
+\item[Signature] \lstinline|is_open(now_utc: datetime) -> bool|
+\item[Contract]  Handles wrap-around sessions where close $<$ open (overnight). Uses the instrument's \code{session_tz}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{risk.kill\_switch}}
+
+\begin{contractbox}{\Cls{KillSwitch}}
+\begin{description}
+\item[Signature] \begin{lstlisting}
+__init__(armed: bool = True, clock: Clock | None = None)
+is_tripped -> bool   # property
+trip(reason: str, actor: str = "system") -> KillSwitchEvent
+arm(actor: str = "operator") -> KillSwitchEvent
+reason -> str | None   # property
+\end{lstlisting}
+\item[Contract] When tripped, the pre-trade gateway rejects every order. Tripping is logged at \code{error} level; arming at \code{warning}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{risk.pre\_trade}}
+
+\begin{contractbox}{\Cls{PreTradeRiskGateway}}
+\begin{description}
+\item[Purpose] Mandatory gate. Every \Cls{OrderIntent} must pass before reaching \Cls{ExecutionAdapter}.
+\item[Signature] \begin{lstlisting}
+__init__(
+    limits: RiskLimits,
+    instruments: InstrumentsConfig,
+    positions: PositionBook,
+    exposure: ExposureCalculator,
+    stale_monitor: StaleDataMonitor,
+    kill_switch: KillSwitch,
+    order_rate: RateLimiter,
+    get_mark: Callable[[str], float | None] | None = None,
+    clock: Clock | None = None,
+)
+
+validate(intent: OrderIntent) -> CheckResult
+\end{lstlisting}
+\item[Checks (all must pass)]
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item \code{kill_switch}      --- rejects if tripped.
+  \item \code{max_order_qty}    --- \code{1 <= qty <= limit}.
+  \item \code{max_position}     --- projected $|$pos$|$ after fill $\le$ limit.
+  \item \code{max_notional}     --- $|qty| \cdot \text{mark} \cdot \text{pointValue} \le$ limit. Skipped when mark is unknown.
+  \item \code{market_session}   --- skipped if \code{require_market_session} is false.
+  \item \code{stale_market_data}--- rejects if last tick older than \code{stale_data_seconds}.
+  \item \code{order_rate_limit} --- consumes a slot from the \code{order_rate} limiter.
+\end{itemize}
+\item[\Cls{CheckResult}] \code{decision: RiskDecision, checks: tuple[ValidationCheck,...]}.
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Module \texttt{execution/}}
+
+\subsection{\texttt{execution.base}}
+
+\begin{contractbox}{\Cls{ExecutionAdapter} (abstract)}
+\begin{description}
+\item[Purpose] Single interface for any venue (EMSX, FIX, paper).
+\item[Signature] \begin{lstlisting}
+class ExecutionAdapter(ABC):
+    def start(self) -> None
+    def stop(self) -> None
+    def submit_order(self, order: OrderIntent) -> ExecutionAck
+    def cancel_order(self, order_id: str) -> ExecutionAck
+    def modify_order(self, order_id: str, changes: dict) -> ExecutionAck
+    def on_execution_update(self, callback: ExecutionUpdateCallback) -> None
+    def on_fill(self, callback: FillCallback) -> None
+\end{lstlisting}
+\item[Contract]
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item Sync calls (\code{submit/cancel/modify}) return an \Cls{ExecutionAck} immediately; persistent state is delivered asynchronously via callbacks.
+  \item Multiple callbacks may be registered for the same event type; all are invoked.
+\end{itemize}
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{execution.emsx\_mapper}}
+
+\begin{contractbox}{\Cls{EMSXMapper}}
+\begin{description}
+\item[Purpose] Only place that knows EMSX wire field names. Translates both directions.
+\item[Signature] \begin{lstlisting}
+to_create_order_and_route(intent: OrderIntent) -> dict[str, Any]
+to_modify_route(route_id: str, changes: dict) -> dict[str, Any]
+to_cancel_route(route_id: str) -> dict[str, Any]
+from_create_response(response: dict, intent: OrderIntent) -> ExecutionAck
+from_route_subscription(msg: dict) -> ExecutionUpdate
+from_fill_message(msg: dict) -> FillUpdate
+\end{lstlisting}
+\item[Status mapping]
+$\{SENT \to SENT, WORKING \to WORKING, PARTFILLED \to PART\_FILLED, FILLED \to FILLED,
+CANCEL \to CANCELLED, REJECTED \to REJECTED, ROUTE\text{-}ERR \to ROUTE\_ERR\}$.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{execution.emsx\_requests}}
+
+\begin{contractbox}{\Cls{EMSXRequests}}
+\begin{description}
+\item[Purpose] Thin BLPAPI wrapper for the EMSX request/response service.
+\item[Signature] \begin{lstlisting}
+start() / stop()
+create_order_and_route(fields: dict) -> dict     # CreateOrderAndRouteEx
+create_order(fields: dict) -> dict               # CreateOrder
+route_ex(fields: dict) -> dict                   # RouteEx
+modify_route(fields: dict) -> dict               # ModifyRouteEx
+cancel_route(fields: dict) -> dict               # CancelRouteEx
+\end{lstlisting}
+\item[Raises] \Cls{EMSXError} on session/service open failure or when \code{blpapi} is missing.
+\item[Note] Unknown fields are logged but do not abort the request --- EMSX schema evolution must not break callers.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{execution.emsx\_subscriptions}}
+
+\begin{contractbox}{\Cls{EMSXSubscriptions}}
+\begin{description}
+\item[Purpose] Subscribes to \code{//blp/emapisvc/order} and \code{//blp/emapisvc/route}; dispatches each message to typed callbacks.
+\item[Signature] \begin{lstlisting}
+__init__(host, port, order_topic, route_topic,
+         order_fields: list[str] | None, route_fields: list[str] | None)
+start() / stop()
+on_order_update(cb: Callable[[dict], None]) -> None
+on_route_update(cb: Callable[[dict], None]) -> None
+\end{lstlisting}
+\item[Defaults] Order/Route fields cover \code{EMSX_SEQUENCE, EMSX_ROUTE_ID, EMSX_TICKER, EMSX_SIDE, EMSX_AMOUNT, EMSX_STATUS, EMSX_FILLED, EMSX_WORKING, EMSX_AVG_PRICE, EMSX_FILL_AMOUNT, EMSX_FILL_PRICE, ...}.
+\item[Resilience] Callback exceptions are caught and logged; the event loop survives.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{execution.emsx\_state\_machine}}
+
+\begin{contractbox}{\Cls{EMSXStateMachine}}
+\begin{description}
+\item[Purpose] Validates that incoming venue-status transitions are legal. Detects out-of-order subscription messages.
+\item[Signature] \begin{lstlisting}
+current(order_id: str) -> OrderStatus
+transition(order_id: str, new: OrderStatus) -> bool      # False if illegal
+on_violation(cb: Callable[[order_id, current, attempted], None]) -> None
+\end{lstlisting}
+\item[Rules] Transitions out of terminal states are violations. Allowed transitions encoded in \code{\_ALLOWED} table.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{execution.emsx\_adapter}}
+
+\begin{contractbox}{\Cls{EMSXExecutionAdapter}}
+\begin{description}
+\item[Purpose] High-level adapter; composes \Cls{EMSXRequests}, \Cls{EMSXSubscriptions}, \Cls{EMSXMapper}, \Cls{EMSXStateMachine}.
+\item[Signature] \begin{lstlisting}
+__init__(config: EMSXConfig, auto_route: bool = True,
+         requests: EMSXRequests | None = None,
+         subscriptions: EMSXSubscriptions | None = None)
+
+start() / stop()
+submit_order(order: OrderIntent) -> ExecutionAck
+cancel_order(order_id: str) -> ExecutionAck
+modify_order(order_id: str, changes: dict) -> ExecutionAck
+on_execution_update(cb) / on_fill(cb)
+\end{lstlisting}
+\item[Routing modes]
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item \code{auto_route=True}  $\to$ \code{CreateOrderAndRouteEx} (Phase 3+).
+  \item \code{auto_route=False} $\to$ \code{CreateOrder} only; trader routes manually in EMSX (Phase 2 staging).
+\end{itemize}
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{execution.paper\_adapter}}
+
+\begin{contractbox}{\Cls{PaperExecutionAdapter}}
+\begin{description}
+\item[Purpose] Internal paper-fill engine. No external wire.
+\item[Signature] \begin{lstlisting}
+__init__(get_mark: Callable[[str], float | None],
+         slippage_ticks: float = 0.0,
+         tick_size_lookup: Callable[[str], float] | None = None)
+\end{lstlisting}
+\item[Behaviour]
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item On submit: emits \code{SENT} update, then a \Cls{FillUpdate}, then \code{FILLED} update.
+  \item Fill price: \code{limit_price} for \code{LMT}; \code{mark + slippage\_ticks * tick\_size * side.sign} otherwise.
+  \item Modifies are not supported.
+\end{itemize}
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Module \texttt{storage/}}
+
+\subsection{\texttt{storage.db}}
+
+\begin{contractbox}{\Cls{Database}, \Fn{get_database}}
+\begin{description}
+\item[Purpose] Minimal SQLite wrapper with shared lock and WAL journal. Schema initialized from \code{schema.sql} on construction.
+\item[Signature] \begin{lstlisting}
+Database(url: str)                              # only sqlite:/// supported
+execute(sql, params=()) -> None
+executemany(sql, params_list) -> None
+query(sql, params=()) -> list[sqlite3.Row]
+cursor() -> context manager
+close() -> None
+
+get_database(url: str | None = None) -> Database  # singleton helper
+\end{lstlisting}
+\item[Raises]  \code{ValueError} on non-sqlite URLs.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{storage.event\_log}}
+
+\begin{contractbox}{\Cls{EventLog} (abstract), \Cls{JsonlEventLog}, \Cls{SqliteEventLog}}
+\begin{description}
+\item[Purpose] Append-only audit trail. Strategy/risk/execution decisions are persisted.
+\item[Signature] \lstinline|append(event_type: str, event: Any, correlation_id: str | None = None) -> None|
+\item[Encoding] Dataclasses are converted via \code{asdict}; \code{Enum}s use \code{.value}; \code{datetime}s use ISO-8601.
+\item[Thread-safety] \Cls{JsonlEventLog} uses an internal lock; safe to share across threads.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{storage.repositories}}
+
+\begin{contractbox}{\Cls{PositionRepository}, \Cls{OrderRepository}, \Cls{FillRepository}, \Cls{RiskDecisionRepository}}
+\begin{description}
+\item[\Cls{PositionRepository}] \code{upsert(instrument, qty, avg_cost)}, \code{get}, \code{all()}.
+\item[\Cls{OrderRepository}] \code{upsert(rec: OrderRecord, leaves_qty)}, \code{by_idempotency_key(key)} for crash-restart dedupe.
+\item[\Cls{FillRepository}] \code{insert(fill)}, \code{for_order(order_id)}.
+\item[\Cls{RiskDecisionRepository}] \code{insert(decision: RiskDecision)}.
+\item[\code{idempotency_key} uniqueness] Enforced by a \code{UNIQUE} constraint in \code{working\_orders}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{storage.snapshots}}
+
+\begin{contractbox}{\Cls{SnapshotStore}}
+\begin{description}
+\item[Signature] \begin{lstlisting}
+save(name: str, payload: dict) -> None
+latest(name: str) -> dict | None
+\end{lstlisting}
+\item[Use] Periodic blob snapshots of risk state, strategy state, etc., for warm restarts.
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Module \texttt{messaging/}}
+
+\subsection{\texttt{messaging.bus}}
+
+\begin{contractbox}{\Cls{EventBus} (abstract)}
+\begin{description}
+\item[Purpose] Pub/sub interface used by every service.
+\item[Signature] \begin{lstlisting}
+class EventBus(ABC):
+    def publish(self, topic: str, payload: Any) -> None
+    def subscribe(self, topic: str, handler: Handler) -> None
+    def start(self) -> None
+    def stop(self) -> None
+\end{lstlisting}
+\item[\code{Handler}] \code{Callable[[topic: str, payload: Any], None]}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{messaging.in\_memory\_bus}}
+
+\begin{contractbox}{\Cls{InMemoryBus}}
+\begin{description}
+\item[Semantics] Synchronous. \code{publish} invokes all subscribed handlers inline.
+\item[Use]       Single-process deployments and tests.
+\item[Failures]  Handler exceptions are logged; never propagate to the publisher.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{messaging.kafka\_bus}}
+
+\begin{contractbox}{\Cls{KafkaBus}}
+\begin{description}
+\item[Signature] \lstinline|KafkaBus(bootstrap: str, group_id: str = "fes")|
+\item[Encoding] Payloads JSON-serialized (dataclasses via \code{asdict}). Background consumer thread invokes handlers.
+\item[Use] Multi-service deployments.
+\item[Optional dep] \code{confluent-kafka}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{messaging.redis\_bus}}
+
+\begin{contractbox}{\Cls{RedisStreamBus}}
+\begin{description}
+\item[Signature] \lstinline|RedisStreamBus(url: str, group: str = "fes", consumer: str = "fes-1")|
+\item[Semantics] Consumer-group reads via \code{XREADGROUP}; \code{XACK} after handler success.
+\item[Optional dep] \code{redis}.
+\end{description}
+\end{contractbox}
+
+\begin{contractbox}{\Fn{make_bus} (factory)}
+\begin{description}
+\item[Signature] \lstinline|make_bus(kind: str, url: str | None = None) -> EventBus|
+\item[\code{kind}] \code{"memory"}, \code{"kafka"} (requires \code{url}), \code{"redis"} (requires \code{url}).
+\item[Raises]  \code{ValueError} for unknown kind or missing URL.
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Module \texttt{monitoring/}}
+
+\subsection{\texttt{monitoring.metrics}}
+
+\begin{contractbox}{\Cls{Metrics}}
+\begin{description}
+\item[Purpose] Prometheus counters/gauges/histograms exposed on the HTTP endpoint.
+\item[Signature] \lstinline|Metrics(port: int | None = 9100)| (pass \code{None} to disable the HTTP server)
+\item[Counters]   \code{ticks_total, bars_total, signals_total, orders_submitted, orders_rejected, fills_total}.
+\item[Gauges]     \code{open_position, working_qty, realized_pnl, unrealized_pnl, kill_switch_tripped, market_data_age_seconds}.
+\item[Histogram]  \code{bar_to_order_seconds} (buckets 5ms ... 5s).
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{monitoring.health}}
+
+\begin{contractbox}{\Cls{HealthProbe}, \Cls{HealthChecker}}
+\begin{description}
+\item[\Cls{HealthProbe}] \code{name, check: Callable[[], bool], detail: Callable[[], str]}.
+\item[\Cls{HealthChecker}] \begin{lstlisting}
+register(probe: HealthProbe) -> None
+check_all() -> dict[name -> {ok: bool, detail: str}]
+is_healthy() -> bool
+\end{lstlisting}
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{monitoring.alerts}}
+
+\begin{contractbox}{\Cls{AlertSink}, \Cls{ConsoleAlertSink}}
+\begin{description}
+\item[Signature] \lstinline|alert(severity: str, message: str, **fields) -> None|
+\item[Severity] \code{critical, error, warning, info}.
+\item[Implementations] \Cls{ConsoleAlertSink} (default). Slack/PagerDuty subclasses pluggable.
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Module \texttt{backtest/}}
+
+\subsection{\texttt{backtest.slippage}}
+
+\begin{contractbox}{\Cls{SlippageModel} (abstract), \Cls{FixedTickSlippage}}
+\begin{description}
+\item[Signature] \lstinline|adjust(mid: float, side: Side, instrument: str) -> float|
+\item[\Cls{FixedTickSlippage}] \code{__init__(ticks: float, tick_size_lookup)}; \code{mid + ticks*tick_size*side.sign}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{backtest.commission}}
+
+\begin{contractbox}{\Cls{CommissionModel} (abstract), \Cls{FlatCommissionModel}}
+\begin{description}
+\item[Signature] \lstinline|per_fill(qty: int, price: float, instrument: str) -> float|
+\item[\Cls{FlatCommissionModel}] \code{__init__(per_contract: float = 1.25)}; \code{|qty| * per_contract}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{backtest.replay}}
+
+\begin{contractbox}{\Cls{BarReplay}, \Cls{TickReplay}}
+\begin{description}
+\item[\Cls{BarReplay}] \code{__iter__()} sorted by \code{end_time}; \code{between(start, end)} yields a subrange.
+\item[\Cls{TickReplay}] \code{__iter__()} sorted by \code{exchange_timestamp or receive_timestamp}.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{backtest.engine}}
+
+\begin{contractbox}{\Cls{BacktestEngine}}
+\begin{description}
+\item[Purpose] Drives the same \Cls{Strategy} + \Cls{OrderManager} + \Cls{PositionBook} components used live. Fills are simulated.
+\item[Signature] \begin{lstlisting}
+__init__(strategy: Strategy, instruments: InstrumentsConfig,
+         slippage: SlippageModel | None = None,
+         commission: CommissionModel | None = None)
+
+run(bars: Iterable[BarClosed]) -> BacktestResult
+\end{lstlisting}
+\item[\Cls{BacktestResult}] \code{bars_processed, targets_emitted, intents_emitted, fills_count,}\\
+                            \code{realized_pnl, unrealized_pnl, total_pnl, total_commission,}\\
+                            \code{end_positions: dict[str,int], timeline: list[(datetime, PnLSnapshot)]}.
+\item[Guarantee] Live $\equiv$ backtest at the strategy + risk + order layer (same code paths).
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{backtest.reports}}
+
+\begin{contractbox}{\Fn{generate_report}}
+\begin{description}
+\item[Signature] \lstinline|generate_report(result: BacktestResult) -> dict[str, Any]|
+\item[Keys returned] \code{bars, targets, intents, fills, realized_pnl, unrealized_pnl, total_pnl, total_commission,}\\
+                     \code{net_pnl, sharpe_annualized, max_drawdown, end_positions}.
+\item[Sharpe convention] Per-bar returns scaled by $\sqrt{252 \cdot 390}$ minutes/year.
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Module \texttt{app/}}
+
+\subsection{\texttt{app.topics}}
+
+\begin{contractbox}{Topic name constants}
+\begin{description}
+\item[Constants] \code{TICKS, BARS, TARGETS, INTENTS, RISK_DECISIONS, EXECUTION_UPDATES, FILLS, KILL_SWITCH}.
+\item[Rule] All services use \emph{only} these constants when publishing/subscribing.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{app.wiring}}
+
+\begin{contractbox}{\Cls{Services}, \Fn{build_services}}
+\begin{description}
+\item[Purpose] Single composition root. Every entry point builds the same DI graph.
+\item[Signature] \begin{lstlisting}
+build_services(
+    config_dir: str | Path, *,
+    metrics_port: int | None = None,
+    market_data: MarketDataProvider | None = None,
+    execution: ExecutionAdapter | None = None,
+) -> Services
+\end{lstlisting}
+\item[\Cls{Services} fields] \code{config, bus, db, event_log, metrics, health, alerts,}\\
+                              \code{market_data, bar_builder, tick_store, stale_monitor,}\\
+                              \code{positions, fills, pnl, exposure, working, idempotency,}\\
+                              \code{order_manager, kill_switch, risk, execution, strategies}.
+\item[Defaults] \Cls{MockMarketDataProvider} and \Cls{PaperExecutionAdapter} when not overridden --- dev/test/paper trading work out of the box.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{app.run\_market\_data}}
+
+\begin{contractbox}{Entry point: \code{run\_market\_data}}
+\begin{description}
+\item[CLI] \code{python -m futures_emsx_strategy.app.run_market_data --config-dir config [--bloomberg|--mock] [--metrics-port N]}.
+\item[Behaviour]
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item Subscribes to instruments listed in \code{instruments.yaml}.
+  \item For each tick: updates \Cls{InMemoryTickStore}, \Cls{StaleDataMonitor}, \Cls{MinuteBarBuilder}, then publishes \code{TICKS}; \code{BARS} on close.
+  \item Persists \code{MarketTick} and \code{BarClosed} to the event log.
+\end{itemize}
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{app.run\_strategy}}
+
+\begin{contractbox}{Entry point: \code{run\_strategy}}
+\begin{description}
+\item[CLI] \code{python -m futures_emsx_strategy.app.run_strategy --config-dir config}.
+\item[Behaviour] Subscribes to \code{BARS}; routes each bar to all strategies bound to that instrument; publishes \code{TARGETS} for each \Cls{TargetPosition} emitted.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{app.run\_execution}}
+
+\begin{contractbox}{Entry point: \code{run\_execution}}
+\begin{description}
+\item[CLI] \code{... --config-dir config [--emsx|--paper] [--auto-route|--stage-only] [--metrics-port N]}.
+\item[Pipeline (per \code{TARGETS} message)]
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+  \item \Cls{OrderManager}\code{.on_target} $\to$ intents.
+  \item Publish \code{INTENTS}; persist; run \Cls{PreTradeRiskGateway}\code{.validate}; persist + publish \code{RISK_DECISIONS}.
+  \item If approved, call \code{execution.submit_order}; update \Cls{WorkingOrderBook} and \Cls{OrderLifecycle}.
+  \item Inbound \code{ExecutionUpdate}/\code{FillUpdate} update lifecycle, working book, positions, PnL, metrics; publish \code{EXECUTION_UPDATES}, \code{FILLS}.
+\end{enumerate}
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{app.run\_reconciler}}
+
+\begin{contractbox}{Entry point: \code{run\_reconciler}}
+\begin{description}
+\item[CLI] \code{... --config-dir config --external-positions broker.json --interval-seconds 60}.
+\item[Behaviour] Periodically loads \code{\{symbol: qty\}} from the file and compares against \Cls{PositionBook}. Emits \code{warning} alerts on breaks. Never auto-resyncs.
+\end{description}
+\end{contractbox}
+
+\subsection{\texttt{app.run\_all\_local}}
+
+\begin{contractbox}{Entry point: \code{run\_all\_local}}
+\begin{description}
+\item[CLI] \code{... --config-dir config [--emit-ticks|--no-emit-ticks] [--seconds N]}.
+\item[Behaviour] One-process composition over \Cls{InMemoryBus}. Used for paper trading, dev, integration testing. With \code{--emit-ticks}, drives \Cls{MockMarketDataProvider} with a synthetic random walk.
+\end{description}
+\end{contractbox}
+
+% =====================================================================
+\clearpage
+\section{Topology \& guarantees}
+
+\subsection{Service boundaries}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Service              & Subscribes to       & Publishes \\
+\midrule
+market-data          & (Bloomberg, OS)      & \code{TICKS}, \code{BARS} \\
+strategy             & \code{BARS}          & \code{TARGETS} \\
+execution            & \code{TARGETS}       & \code{INTENTS}, \code{RISK_DECISIONS}, \code{EXECUTION_UPDATES}, \code{FILLS} \\
+reconciler           & (filesystem, OS)     & alerts \\
+monitoring           & (Prometheus scrape)  & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Idempotency \& at-least-once delivery}
+
+The bus is treated as \emph{at-least-once}. Idempotency is enforced inside the \Cls{OrderManager} via \code{idempotency\_key}:
+
+\begin{lstlisting}
+key = SHA1(strategy_id | instrument | bar_end | side | qty)[:16]
+\end{lstlisting}
+
+If the same key has already been claimed by \Cls{IdempotencyStore}, the intent is suppressed. The same key is also stored in \code{working\_orders.idempotency\_key} (\code{UNIQUE}), giving database-level dedupe across restarts.
+
+\subsection{State-machine invariants}
+
+\Cls{EMSXStateMachine} only permits the transitions in \code{\_ALLOWED}. Notable rules:
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item Terminal states (\code{FILLED, CANCELLED, REJECTED, ROUTE_ERR}) are sinks. Any further status change triggers a violation callback.
+  \item \code{NEW} cannot jump directly to \code{SENT}; it must first be \code{RISK_APPROVED}.
+  \item \code{UNKNOWN} is a recovery state --- any transition back into known states is allowed, used after gap-fill on restart.
+\end{itemize}
+
+\subsection{Phased rollout flags}
+
+\begin{tabular}{@{}lll@{}}
+\toprule
+Phase & Adapter                                        & Notes \\
+\midrule
+1     & \Cls{PaperExecutionAdapter}                    & No external wire; full audit \\
+2     & \Cls{EMSXExecutionAdapter} \code{auto_route=False} & Stages orders; trader routes \\
+3     & \Cls{EMSXExecutionAdapter} \code{auto_route=True}  & Tight \code{risk\_limits.yaml}, one symbol, small size \\
+4     & Same as 3                                       & Production limits, reconciler + kill switch live \\
+\bottomrule
+\end{tabular}
+
+\subsection{Error budget for live trading}
+
+Any of the following must trip the kill switch (manually or via alert action):
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item Market data age $>$ \code{stale_data_seconds} (default 30) for any subscribed instrument.
+  \item Sustained risk rejections (e.g., $>$ 1/s for 5 min).
+  \item State-machine violations (\code{EMSXStateMachine.on\_violation}).
+  \item Position breaks reported by \Cls{Reconciler}.
+\end{itemize}
+
+% =====================================================================
+\clearpage
+\section{Quick reference --- minimum contracts to satisfy when extending}
+
+\subsection{Adding a market-data vendor}
+
+Implement \Cls{MarketDataProvider} (see \S \ref{section:bloomberg}---no, \texttt{market\_data.base}). Bind it into \Fn{build_services} via the \code{market\_data} argument. No other layer changes.
+
+\subsection{Adding a venue}
+
+Implement \Cls{ExecutionAdapter}. Provide a venue-specific mapper analogous to \Cls{EMSXMapper}. Reuse \Cls{EMSXStateMachine} or write a venue-specific one. Bind via the \code{execution} argument to \Fn{build_services}.
+
+\subsection{Adding a strategy}
+
+Subclass \Cls{Strategy}. Read only via \Cls{PortfolioView}. Emit \Cls{TargetPosition}. Add an entry under \code{strategies.yaml}; the wiring layer instantiates it.
+
+\subsection{Adding a risk check}
+
+Add a private method \code{_check_*} to \Cls{PreTradeRiskGateway} that returns a \Cls{ValidationCheck}. Append it to the list inside \code{validate}. Tests must show that a failing case rejects the order with that check's name in \code{reasons}.
+
+\subsection{Adding a bus implementation}
+
+Implement \Cls{EventBus}. Register it in \Fn{make_bus}. The new transport must:
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item Serialize dataclasses correctly (see \Cls{KafkaBus} pattern).
+  \item Catch and log handler exceptions.
+  \item Provide at-least-once delivery (so \Cls{IdempotencyStore} can dedupe).
+\end{itemize}
+
+% =====================================================================
+\clearpage
+\section{Test contract surface}
+
+Every test in \code{futures\_emsx\_strategy/tests/} corresponds to a published invariant.
+
+\begin{longtable}{@{}p{6cm}p{9cm}@{}}
+\toprule
+Test                                              & Invariant being enforced \\
+\midrule
+\code{unit/test\_bar\_builder.py}                 & Bars close only on a strictly later minute; \code{flush()} drains pending. \\
+\code{unit/test\_order\_manager.py}               & $\Delta$ math, working-qty offset, sign of \code{Side.from\_delta}, idempotency dedupe. \\
+\code{unit/test\_pre\_trade\_risk.py}             & Each risk check rejects exactly its scenario; happy path approves. \\
+\code{unit/test\_positions\_pnl.py}               & Weighted-average cost, realized PnL with point value, unrealized when flat. \\
+\code{unit/test\_state\_machine.py}               & Legal transition chain; post-terminal transitions are violations. \\
+\code{unit/test\_indicators.py}                   & Indicators return \code{None} until ready; constant series $\Rightarrow$ z-score 0. \\
+\code{integration/test\_end\_to\_end\_paper.py}   & Ticks $\to$ bars $\to$ strategy $\to$ risk $\to$ paper fills $\to$ position update. \\
+\code{integration/test\_backtest.py}              & Backtest engine runs and reports keys exist. \\
+\code{emsx\_sim/test\_emsx\_adapter\_fake.py}     & Adapter pipeline against an in-process BLPAPI fake; route subscription $\to$ fill propagation. \\
+\code{replay/test\_replay\_deterministic.py}      & Same bar series $\Rightarrow$ identical orders + idempotency keys. \\
+\bottomrule
+\end{longtable}
+
+\vspace{1em}
+\noindent\textbf{End of document.}
+
+\end{document}

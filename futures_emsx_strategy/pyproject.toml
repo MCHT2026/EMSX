@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "futures_emsx_strategy"
+version = "0.1.0"
+description = "Minute-bar futures strategy with Bloomberg market data and EMSX execution"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0",
+    "pydantic>=2.5",
+    "python-dateutil>=2.8",
+    "structlog>=24.1",
+    "prometheus-client>=0.19",
+    "click>=8.1",
+    "pandas>=2.1",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+bloomberg = ["blpapi>=3.20"]
+kafka = ["confluent-kafka>=2.3"]
+redis = ["redis>=5.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+    "mypy>=1.8",
+    "freezegun>=1.4",
+]
+
+[project.scripts]
+fes-market-data = "futures_emsx_strategy.app.run_market_data:main"
+fes-strategy = "futures_emsx_strategy.app.run_strategy:main"
+fes-execution = "futures_emsx_strategy.app.run_execution:main"
+fes-reconciler = "futures_emsx_strategy.app.run_reconciler:main"
+fes-local = "futures_emsx_strategy.app.run_all_local:main"
+
+[tool.setuptools.packages.find]
+include = ["futures_emsx_strategy*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["futures_emsx_strategy/tests"]
+asyncio_mode = "auto"
