@@ -19,13 +19,30 @@ log = get_logger(__name__)
 @click.option("--metrics-port", default=None, type=int)
 @click.option("--bloomberg/--mock", default=False)
 def main(config_dir: str, metrics_port: int | None, bloomberg: bool) -> None:
+    # Load config first so the provider gets host/port/service from market_data.yaml
+    # rather than BloombergMarketDataProvider's hard-coded defaults.
+    from ..config.loader import load_app_config
+    cfg = load_app_config(config_dir)
+
     md = None
     if bloomberg:
         from ..market_data.bloomberg_provider import BloombergMarketDataProvider
-        md = BloombergMarketDataProvider()
+        # We subscribe under bloomberg_topic but report ticks under symbol so
+        # the rest of the system (positions, risk, etc.) uses a stable key.
+        topic_to_symbol = {
+            i.bloomberg_topic: i.symbol for i in cfg.instruments.instruments
+        }
+        md = BloombergMarketDataProvider(
+            host=cfg.market_data.host,
+            port=cfg.market_data.port,
+            service=cfg.market_data.service,
+            historical_service=cfg.market_data.historical_service,
+            topic_to_symbol=topic_to_symbol,
+        )
 
     services = build_services(config_dir, metrics_port=metrics_port, market_data=md)
-    instruments = [i.symbol for i in services.config.instruments.instruments]
+    # Subscribe under bloomberg_topic so logical symbol != topic is supported.
+    topics = [i.bloomberg_topic for i in services.config.instruments.instruments]
 
     def on_tick(tick: MarketTick) -> None:
         services.tick_store.append(tick)
@@ -44,7 +61,7 @@ def main(config_dir: str, metrics_port: int | None, bloomberg: bool) -> None:
     services.market_data.on_tick(on_tick)
     services.bar_builder.on_bar(on_bar)
     services.market_data.start()
-    services.market_data.subscribe(instruments, services.config.market_data.fields)
+    services.market_data.subscribe(topics, services.config.market_data.fields)
     services.bus.start()
 
     stop = False
@@ -55,7 +72,7 @@ def main(config_dir: str, metrics_port: int | None, bloomberg: bool) -> None:
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
-    log.info("market_data_service_started", instruments=instruments)
+    log.info("market_data_service_started", topics=topics)
     while not stop:
         time.sleep(1.0)
     services.market_data.stop()

@@ -58,13 +58,23 @@ def test_short_delta():
     assert intents[0].qty == 8
 
 
-def test_idempotency_suppresses_duplicate():
+def test_idempotency_seen_suppresses_regeneration():
+    """OrderManager regenerates intents on every call (because risk may have
+    rejected the previous one). Once the runner *commits* a key via
+    ``IdempotencyStore.mark`` (or .claim), subsequent regeneration is
+    suppressed."""
     pos = PositionBook()
     pos.set("ESM6 Index", 5)
     idemp = IdempotencyStore()
     om = OrderManager(pos, WorkingOrderBook(), idemp)
     ts = datetime(2026, 5, 20, 14, 31, tzinfo=timezone.utc)
+
     first = om.on_target(_target(8, ts))
-    second = om.on_target(_target(8, ts))
     assert len(first) == 1
-    assert second == []
+    # Transient rejection scenario: nothing marked -> next call still emits.
+    again_unmarked = om.on_target(_target(8, ts))
+    assert len(again_unmarked) == 1, "transient rejection must remain retryable"
+    # Runner committed the key (e.g. successful submission). Now suppress.
+    idemp.mark(first[0].idempotency_key)
+    third = om.on_target(_target(8, ts))
+    assert third == []

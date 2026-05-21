@@ -38,7 +38,12 @@ class BloombergMarketDataProvider(MarketDataProvider):
         port: int = 8194,
         service: str = "//blp/mktdata",
         historical_service: str = "//blp/refdata",
+        topic_to_symbol: dict[str, str] | None = None,
     ) -> None:
+        """``topic_to_symbol`` lets the caller subscribe under Bloomberg topics
+        (e.g. ``ESM6 Index``) while reporting ticks under the application's
+        internal instrument key (e.g. ``ES1``). When omitted, the topic is
+        used verbatim as the instrument."""
         if not _HAVE_BLPAPI:
             raise MarketDataError(
                 "blpapi is not installed. Install with: pip install futures_emsx_strategy[bloomberg]"
@@ -47,6 +52,7 @@ class BloombergMarketDataProvider(MarketDataProvider):
         self.port = port
         self.service = service
         self.historical_service = historical_service
+        self._topic_to_symbol: dict[str, str] = dict(topic_to_symbol or {})
         self._session: "blpapi.Session | None" = None
         self._callbacks: list[TickCallback] = []
         self._sub_list: "blpapi.SubscriptionList | None" = None
@@ -100,7 +106,8 @@ class BloombergMarketDataProvider(MarketDataProvider):
                     log.info("bloomberg_status", msg=str(msg))
 
     def _dispatch_tick(self, msg) -> None:  # type: ignore[no-untyped-def]
-        instrument = str(msg.correlationIds()[0].value())
+        topic = str(msg.correlationIds()[0].value())
+        instrument = self._topic_to_symbol.get(topic, topic)
         bid = self._get_field(msg, "BID")
         ask = self._get_field(msg, "ASK")
         last = self._get_field(msg, "LAST_PRICE")

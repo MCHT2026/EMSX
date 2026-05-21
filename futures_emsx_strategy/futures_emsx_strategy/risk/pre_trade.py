@@ -63,6 +63,10 @@ class PreTradeRiskGateway:
 
     def validate(self, intent: OrderIntent) -> CheckResult:
         now = self.clock.now()
+        # Run cheap / stateless checks first. The rate-limit check has a
+        # side effect (consumes a token), so we only run it when every other
+        # check has passed; otherwise a transient stale-data or session
+        # rejection would needlessly drain the budget.
         checks: list[ValidationCheck] = [
             self._check_kill_switch(),
             self._check_max_order_qty(intent),
@@ -70,9 +74,13 @@ class PreTradeRiskGateway:
             self._check_max_notional(intent),
             self._check_session(intent, now),
             self._check_stale_data(intent),
-            self._check_rate_limit(),
         ]
         failures = [c for c in checks if not c.passed]
+        if not failures:
+            rate = self._check_rate_limit()
+            checks.append(rate)
+            if not rate.passed:
+                failures.append(rate)
         if failures:
             decision = RiskDecision.reject(
                 intent.idempotency_key,

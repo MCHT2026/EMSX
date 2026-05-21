@@ -1,4 +1,10 @@
-"""Tracks idempotency keys we have already submitted. Survives process restart if backed by storage."""
+"""Tracks idempotency keys we have already submitted.
+
+Backends must provide an *atomic* ``claim(key) -> bool`` that returns True iff
+this caller is the one that inserted the row. Check-then-add is not enough
+under concurrent processes; SQLite's ``INSERT OR IGNORE`` plus
+``cursor.rowcount`` is the canonical pattern.
+"""
 from __future__ import annotations
 
 from threading import Lock
@@ -8,6 +14,7 @@ from typing import Protocol
 class IdempotencyBackend(Protocol):
     def has(self, key: str) -> bool: ...
     def add(self, key: str) -> None: ...
+    def claim(self, key: str) -> bool: ...
 
 
 class _InMemoryBackend:
@@ -23,6 +30,13 @@ class _InMemoryBackend:
         with self._lock:
             self._seen.add(key)
 
+    def claim(self, key: str) -> bool:
+        with self._lock:
+            if key in self._seen:
+                return False
+            self._seen.add(key)
+            return True
+
 
 class IdempotencyStore:
     def __init__(self, backend: IdempotencyBackend | None = None) -> None:
@@ -35,7 +49,13 @@ class IdempotencyStore:
         self._backend.add(key)
 
     def claim(self, key: str) -> bool:
-        """Atomic-ish: returns True if this key is new (and now marked)."""
+        """Atomic claim. Returns True iff this call is the one that inserted
+        the row; concurrent callers racing on the same key see at most one
+        ``True``. Backwards-compatible fallback for legacy backends without a
+        native ``claim`` is provided but is *not* race-safe."""
+        backend_claim = getattr(self._backend, "claim", None)
+        if backend_claim is not None:
+            return bool(backend_claim(key))
         if self._backend.has(key):
             return False
         self._backend.add(key)

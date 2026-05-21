@@ -1,9 +1,15 @@
-"""OrderManager: turns TargetPosition events into deduplicated OrderIntent events.
+"""OrderManager: turns TargetPosition events into OrderIntent events.
 
 Decision rule:
     delta = target_qty - current_position - net_working_qty
 If delta is zero, no order. Else side = sign(delta), qty = abs(delta).
-Idempotency key dedupes restarts and bar replays.
+
+Idempotency: each intent carries a deterministic ``idempotency_key``. The
+manager *checks* (via ``IdempotencyStore.seen``) whether the key was already
+committed and suppresses regeneration in that case --- but it does NOT claim
+the key here. The runner claims atomically *after* risk approval, just before
+submitting to the venue. That way a transient risk rejection (e.g. stale
+data) leaves the key un-claimed so the next bar / retry can succeed.
 """
 from __future__ import annotations
 
@@ -63,9 +69,12 @@ class OrderManager:
                 side=side.value,
                 qty=clip if len(clips) == 1 else (clip * 1000 + i),
             )
-            if not self.idempotency.claim(key):
+            if self.idempotency.seen(key):
+                # Already committed by a previous successful submission; do
+                # not regenerate. Suppression by ``seen`` is a read-only check
+                # so transient risk rejections do NOT poison this key.
                 log.info(
-                    "order_intent_suppressed_duplicate",
+                    "order_intent_suppressed_already_submitted",
                     key=key,
                     strategy=target.strategy_id,
                     instrument=target.instrument,

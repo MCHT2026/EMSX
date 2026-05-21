@@ -438,8 +438,11 @@ class MarketDataProvider(ABC):
 \item[Signature] \begin{lstlisting}
 __init__(host="localhost", port=8194,
          service="//blp/mktdata",
-         historical_service="//blp/refdata")
+         historical_service="//blp/refdata",
+         topic_to_symbol: dict[str, str] | None = None)
 \end{lstlisting}
+\item[\code{topic_to_symbol}] Optional translation map applied on receive: ticks subscribed under a Bloomberg topic (e.g. \code{ESM6 Index}) are reported under the application's internal symbol (e.g. \code{ES1}). When omitted, the topic is used verbatim.
+\item[Wiring] \Cls{app.run_market_data} constructs the provider from \code{market_data.yaml} (host, port, service, historical\_service) and subscribes to \code{instruments.yaml::bloomberg_topic}; the translation map is built from \code{\{i.bloomberg_topic: i.symbol\}}.
 \item[Pre]    \code{blpapi} is installed; reachable Bloomberg session (Desktop API, SAPI, or B-PIPE).
 \item[Raises] \Cls{MarketDataError} if session start or service open fails, or if \code{blpapi} is missing.
 \item[Fields supported] \code{BID, ASK, LAST_PRICE, VOLUME, EVT_TIME_STAMP} (any subset).
@@ -737,12 +740,18 @@ snapshot() -> list[tuple[order_id, sym, Side, qty, OrderStatus]]
 
 \begin{contractbox}{\Cls{IdempotencyBackend} (protocol), \Cls{IdempotencyStore}}
 \begin{description}
+\item[\Cls{IdempotencyBackend} protocol] \begin{lstlisting}
+has(key: str) -> bool
+add(key: str) -> None
+claim(key: str) -> bool       # ATOMIC: True iff this caller inserted the row
+\end{lstlisting}
 \item[\Cls{IdempotencyStore}] \begin{lstlisting}
 seen(key: str) -> bool
 mark(key: str) -> None
-claim(key: str) -> bool    # True iff key was new (and is now marked)
+claim(key: str) -> bool
 \end{lstlisting}
-\item[Default backend] In-memory; swap in a Redis/SQL backend by passing an alternate \Cls{IdempotencyBackend}.
+\item[Atomicity] \code{claim} must be race-safe across concurrent callers (and processes, when the backend is durable). \Cls{SqliteIdempotencyBackend} uses ``\code{INSERT OR IGNORE}'' plus \code{cursor.rowcount}; the in-memory backend uses an internal lock. Check-then-add is not sufficient.
+\item[Backends] \code{_InMemoryBackend} (default, in-process) and \Cls{SqliteIdempotencyBackend} (persistent, race-safe).
 \end{description}
 \end{contractbox}
 
@@ -811,8 +820,9 @@ on_target(target: TargetPosition) -> list[OrderIntent]
   \item If $\Delta = 0$, return \code{[]}.
   \item Otherwise \code{side = Side.from_delta(}$\Delta$\code{)}, \code{qty = |}$\Delta$\code{|}.
   \item Optionally slice with \code{max_clip}.
-  \item For each clip, compute a deterministic \code{idempotency_key}; submit only if \code{idempotency.claim(key)} returns \code{True}.
+  \item For each clip, compute a deterministic \code{idempotency_key}. If \code{idempotency.seen(key)} is true (a previous submission was committed) skip; otherwise emit the intent. The manager does NOT claim the key here --- claim is the runner's responsibility, post risk-approval.
 \end{enumerate}
+\item[Why seen, not claim?] A transient risk rejection (stale data, session closed) would otherwise permanently poison the key and block retries.
 \end{description}
 \end{contractbox}
 
@@ -894,6 +904,7 @@ validate(intent: OrderIntent) -> CheckResult
   \item \code{stale_market_data}--- rejects if last tick older than \code{stale_data_seconds}.
   \item \code{order_rate_limit} --- consumes a slot from the \code{order_rate} limiter.
 \end{itemize}
+\item[Rate-limit ordering] \code{order_rate_limit} is the only check with a side effect (token consumption). It runs \emph{only} when every other check has already passed, so a transient stale-data or session rejection cannot drain the budget.
 \item[\Cls{CheckResult}] \code{decision: RiskDecision, checks: tuple[ValidationCheck,...]}.
 \end{description}
 \end{contractbox}
@@ -986,10 +997,12 @@ on_route_update(cb: Callable[[dict], None]) -> None
 \item[Purpose] Validates that incoming venue-status transitions are legal. Detects out-of-order subscription messages.
 \item[Signature] \begin{lstlisting}
 current(order_id: str) -> OrderStatus
+seed(order_id: str, state=OrderStatus.UNKNOWN) -> None
 transition(order_id: str, new: OrderStatus) -> bool      # False if illegal
 on_violation(cb: Callable[[order_id, current, attempted], None]) -> None
 \end{lstlisting}
 \item[Rules] Transitions out of terminal states are violations. Allowed transitions encoded in \code{\_ALLOWED} table.
+\item[Seed semantics] Adapters seed the state under \code{UNKNOWN} the moment a venue order id is allocated, so direct \code{NEW $\to$ WORKING} jumps (EMSX often skips \code{SENT}) are not flagged.
 \end{description}
 \end{contractbox}
 
@@ -1014,6 +1027,8 @@ on_execution_update(cb) / on_fill(cb)
   \item \code{auto_route=True}  $\to$ \code{CreateOrderAndRouteEx} (Phase 3+).
   \item \code{auto_route=False} $\to$ \code{CreateOrder} only; trader routes manually in EMSX (Phase 2 staging).
 \end{itemize}
+\item[Subscription-id race --- contract] The runner pre-registers each order under \code{intent.idempotency_key} (its internal id). EMSX subscriptions report \code{EMSX\_SEQUENCE} (the venue id). The adapter maintains an internal \code{EMSX\_SEQUENCE $\to$ client\_order\_id} mapping populated on \code{submit\_order} ack and \emph{rewrites} every outgoing \Cls{ExecutionUpdate} / \Cls{FillUpdate} to carry the client id in \code{order_id}.
+\item[Subscription-id race --- buffer] If a route subscription fires \emph{before} the ack lands, the update is buffered keyed by \code{EMSX\_SEQUENCE}. When \code{submit\_order} returns, the buffered updates are replayed under the now-known client id, in order. No updates are silently dropped.
 \end{description}
 \end{contractbox}
 
@@ -1088,13 +1103,15 @@ get_database(url: str | None = None) -> Database  # singleton helper
 
 \begin{contractbox}{\Cls{SqliteIdempotencyBackend}}
 \begin{description}
-\item[Purpose] Persistent dedupe backend for \Cls{IdempotencyStore}. Survives process restart, so a re-played bar after a crash cannot resubmit an already-accepted order.
+\item[Purpose] Persistent, race-safe dedupe backend for \Cls{IdempotencyStore}. Survives restart so a re-played bar cannot resubmit an already-accepted order; tolerates concurrent processes so two services racing on the same key see exactly one winner.
 \item[Signature] \begin{lstlisting}
 __init__(db: Database)
 has(key: str) -> bool
-add(key: str) -> None        # INSERT OR IGNORE on submitted_intents
+add(key: str) -> None
+claim(key: str) -> bool      # ATOMIC: True iff this call actually inserted
 \end{lstlisting}
-\item[Wiring] Default backend assembled by \Fn{build_services}: \code{IdempotencyStore(backend=SqliteIdempotencyBackend(db))}.
+\item[Implementation] \code{claim} executes a single ``\code{INSERT OR IGNORE INTO submitted_intents}'' and inspects \code{cursor.rowcount}. SQLite serializes writes; rowcount is 1 on insert, 0 on the ignored conflict.
+\item[Wiring] Default backend assembled by \Fn{build_services}.
 \item[Schema] \code{submitted_intents (idempotency_key PRIMARY KEY, submitted_at TEXT NOT NULL)}.
 \end{description}
 \end{contractbox}
@@ -1199,7 +1216,8 @@ from_dict(cls: type, data: dict) -> Any
 \begin{contractbox}{\Cls{Metrics}}
 \begin{description}
 \item[Purpose] Prometheus counters/gauges/histograms exposed on the HTTP endpoint.
-\item[Signature] \lstinline|Metrics(port: int | None = 9100)| (pass \code{None} to disable the HTTP server)
+\item[Signature] \lstinline|Metrics(port: int | None = 9100)| (pass \code{None} or \code{0} to disable)
+\item[Per-instance registry] Each \Cls{Metrics} owns a dedicated \Cls{CollectorRegistry}, so tests, dev REPLs, and warm-restart flows can construct multiple service graphs in one process without colliding on the prometheus global registry.
 \item[Counters]   \code{ticks_total, bars_total, signals_total, orders_submitted, orders_rejected, fills_total}.
 \item[Gauges]     \code{open_position, working_qty, realized_pnl, unrealized_pnl, kill_switch_tripped, market_data_age_seconds}.
 \item[Histogram]  \code{bar_to_order_seconds} (buckets 5ms ... 5s).
@@ -1319,7 +1337,9 @@ build_services(
 \item[\Cls{Services} fields] \code{config, bus, db, event_log, metrics, health, alerts,}\\
                               \code{market_data, bar_builder, tick_store, stale_monitor,}\\
                               \code{positions, fills, pnl, exposure, working, idempotency,}\\
-                              \code{order_manager, kill_switch, risk, execution, strategies}.
+                              \code{order_manager, kill_switch, risk, execution, strategies,}\\
+                              \code{position_repo, order_repo, fill_repo, risk_decision_repo}.
+\item[Warm restart] On construction, \code{position_repo.all()} is loaded into the in-memory \Cls{PositionBook}. Runners persist on every fill (\code{position_repo.upsert} + \code{fill_repo.insert}) and on every risk decision (\code{risk_decision_repo.insert}); a fresh process picks up where the previous one left off without manual reconciliation.
 \item[Defaults] \Cls{MockMarketDataProvider} and \Cls{PaperExecutionAdapter} when not overridden --- dev/test/paper trading work out of the box.
 \item[Idempotency wiring] \code{IdempotencyStore} is constructed with a \Cls{SqliteIdempotencyBackend} over the configured DB, so claimed keys persist across restarts.
 \item[Metrics-port resolution] If a CLI \code{--metrics-port} is given it wins; otherwise \code{environments.metrics_port} is used. A value of \code{0} or less disables the Prometheus HTTP endpoint in either source.
@@ -1354,16 +1374,19 @@ build_services(
 \begin{contractbox}{Entry point: \code{run\_execution}}
 \begin{description}
 \item[CLI] \code{... --config-dir config [--emsx|--paper] [--auto-route|--stage-only] [--metrics-port N]}.
+\item[Subscriptions] \code{TICKS} (feed \Cls{StaleDataMonitor} and \Cls{InMemoryTickStore}) and \code{TARGETS}. The tick subscription is mandatory --- without it the risk gate rejects every order for stale data in split deployments.
 \item[Pipeline (per \code{TARGETS} message)]
 \begin{enumerate}[leftmargin=*,itemsep=2pt]
   \item \Cls{OrderManager}\code{.on_target} $\to$ intents.
-  \item Publish \code{INTENTS}; persist; run \Cls{PreTradeRiskGateway}\code{.validate}; persist + publish \code{RISK_DECISIONS}.
-  \item If approved: \emph{pre-register} the order in \Cls{WorkingOrderBook} and \Cls{OrderLifecycle} under \code{intent.idempotency_key} (status \code{NEW}). \emph{Then} call \code{execution.submit_order}.
+  \item Publish \code{INTENTS}; run \Cls{PreTradeRiskGateway}\code{.validate}; persist via \Cls{RiskDecisionRepository}; publish \code{RISK_DECISIONS}.
+  \item If approved: \code{idempotency.claim(key)}. Skip if it returns \code{False} (already submitted, e.g. duplicate target on the bus).
+  \item Pre-register the order in \Cls{WorkingOrderBook} and \Cls{OrderLifecycle} under \code{intent.idempotency_key} (status \code{NEW}). \emph{Then} call \code{execution.submit_order}.
   \item Use \Cls{OrderLifecycle}\code{.set_venue_info} to record \code{ack.order_id} / \code{ack.route_id}. Do not overwrite status from the ack --- callbacks own it.
   \item On rejection ack: write \code{REJECTED} status to lifecycle and zero out the working entry.
-  \item Inbound \code{ExecutionUpdate}/\code{FillUpdate} use \Cls{OrderLifecycle}\code{.resolve} (internal id, fallback venue id) and update lifecycle, working book, positions, PnL, metrics; publish \code{EXECUTION_UPDATES}, \code{FILLS}.
+  \item Inbound \code{ExecutionUpdate}/\code{FillUpdate} use \Cls{OrderLifecycle}\code{.resolve} and update lifecycle, working book, positions, PnL, metrics; publish \code{EXECUTION_UPDATES}, \code{FILLS}; on fill, also write to \Cls{FillRepository} and upsert \Cls{PositionRepository}.
 \end{enumerate}
 \item[Why pre-register?] The paper adapter fires \code{SENT}/fill/\code{FILLED} callbacks synchronously inside \code{submit_order}. Without pre-registration, the runner's post-submit bookkeeping would race the callbacks and leave a phantom working entry stuck at \code{SENT}.
+\item[Why claim post-risk, not in OrderManager?] A transient risk rejection (stale data, session) must remain retryable. Claiming after risk approves leaves the key un-committed when risk rejects, so the next bar / restart can succeed.
 \end{description}
 \end{contractbox}
 
@@ -1395,16 +1418,18 @@ build_services(
 \small
 \begin{tabular}{@{}lll@{}}
 \toprule
-Service              & Subscribes to       & Publishes \\
+Service              & Subscribes to               & Publishes \\
 \midrule
-market-data          & (Bloomberg, OS)      & \code{TICKS}, \code{BARS} \\
-strategy             & \code{BARS}          & \code{TARGETS} \\
-execution            & \code{TARGETS}       & \code{INTENTS}, \code{RISK_DECISIONS}, \code{EXECUTION_UPDATES}, \code{FILLS} \\
-reconciler           & (filesystem, OS)     & alerts \\
-monitoring           & (Prometheus scrape)  & --- \\
+market-data          & (Bloomberg, OS)             & \code{TICKS}, \code{BARS} \\
+strategy             & \code{TICKS}, \code{BARS}   & \code{TARGETS} \\
+execution            & \code{TICKS}, \code{TARGETS}& \code{INTENTS}, \code{RISK_DECISIONS}, \code{EXECUTION_UPDATES}, \code{FILLS} \\
+reconciler           & (filesystem, OS)            & alerts \\
+monitoring           & (Prometheus scrape)         & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+\textbf{Tick subscription is mandatory for any service that runs the pre-trade risk gate.} Without it, \Cls{StaleDataMonitor} sees the instrument as never seen and rejects every intent for stale data.
 
 \subsection{Idempotency \& at-least-once delivery}
 
@@ -1496,6 +1521,13 @@ Test                                              & Invariant being enforced \\
 \code{unit/test\_paper\_cleanup.py}               & Paper fills leave no phantom working orders; rejected ack clears the pre-register. \\
 \code{unit/test\_sqlite\_idempotency.py}          & SQLite-backed claims survive a fresh \Cls{Database} instance on the same file. \\
 \code{unit/test\_bar\_invariants.py}              & Historical bars satisfy \code{end_time > start_time} from any provider. \\
+\code{unit/test\_emsx\_race.py}                   & EMSX route updates arriving before \code{submit\_order} ack are buffered and replayed; all updates resolve to the client id. \\
+\code{unit/test\_idempotency\_atomic.py}          & Concurrent claim on the same key yields exactly one winner (SQLite + in-memory). \\
+\code{unit/test\_risk\_rate\_limit\_deferred.py}  & Rejected intents do not drain the rate limiter; approved intents consume one slot each. \\
+\code{unit/test\_synthetic\_tick\_clock.py}       & Synthetic tick generator's timestamps are strictly monotonic across hour and day boundaries. \\
+\code{unit/test\_bloomberg\_provider\_config.py}  & Bloomberg provider applies \code{topic\_to\_symbol}; honors host/service args. \\
+\code{integration/test\_state\_restore.py}        & Positions persist on fill and are restored on a fresh \code{build\_services}. \\
+\code{integration/test\_split\_service.py}        & Execution-service tick subscription feeds \Cls{StaleDataMonitor}. \\
 \code{unit/test\_state\_machine.py}               & Legal transition chain; post-terminal transitions are violations. \\
 \code{unit/test\_indicators.py}                   & Indicators return \code{None} until ready; constant series $\Rightarrow$ z-score 0. \\
 \code{integration/test\_end\_to\_end\_paper.py}   & Ticks $\to$ bars $\to$ strategy $\to$ risk $\to$ paper fills $\to$ position update. \\

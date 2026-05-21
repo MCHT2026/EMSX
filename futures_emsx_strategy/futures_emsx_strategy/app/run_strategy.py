@@ -6,8 +6,9 @@ import time
 
 import click
 
+from ..core.events import MarketTick
 from ..core.logging import get_logger
-from .topics import BARS, TARGETS
+from .topics import BARS, TARGETS, TICKS
 from .wiring import build_services
 
 log = get_logger(__name__)
@@ -32,6 +33,11 @@ def main(config_dir: str, metrics_port: int | None) -> None:
                 services.event_log.append("TargetPosition", tgt)
                 services.bus.publish(TARGETS, tgt)
 
+    def on_tick(_topic: str, tick: MarketTick) -> None:
+        services.tick_store.append(tick)
+        services.stale_monitor.on_tick(tick)
+
+    services.bus.subscribe(TICKS, on_tick)
     services.bus.subscribe(BARS, on_bar)
     services.bus.start()
     stop = False

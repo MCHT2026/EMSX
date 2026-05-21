@@ -59,10 +59,20 @@ def main(config_dir: str, metrics_port: int | None, seconds: int, emit_ticks: bo
             services.bus.publish(INTENTS, intent)
             decision = services.risk.validate(intent).decision
             services.event_log.append("RiskDecision", decision)
+            services.risk_decision_repo.insert(decision)
             services.bus.publish(RISK_DECISIONS, decision)
             if not decision.approved:
                 for reason in decision.reasons:
                     services.metrics.orders_rejected.labels(reason=reason.split(":")[0]).inc()
+                continue
+
+            if not services.idempotency.claim(intent.idempotency_key):
+                services.metrics.orders_rejected.labels(reason="duplicate").inc()
+                log.info(
+                    "intent_dropped_already_claimed",
+                    key=intent.idempotency_key,
+                    instrument=intent.instrument,
+                )
                 continue
 
             internal_id = intent.idempotency_key
@@ -134,6 +144,11 @@ def main(config_dir: str, metrics_port: int | None, seconds: int, emit_ticks: bo
         services.positions.apply_fill(fill)
         services.pnl.apply_fill(fill)
         services.fills.record(fill)
+        services.fill_repo.insert(fill)
+        avg = services.positions.avg_cost(fill.instrument) or 0.0
+        services.position_repo.upsert(
+            fill.instrument, services.positions.position(fill.instrument), avg
+        )
         services.metrics.fills_total.labels(instrument=fill.instrument).inc()
         services.metrics.open_position.labels(instrument=fill.instrument).set(
             services.positions.position(fill.instrument)
@@ -175,28 +190,31 @@ def main(config_dir: str, metrics_port: int | None, seconds: int, emit_ticks: bo
 
 
 def _drive_mock_ticks(services, md: MockMarketDataProvider, stop: list[bool]) -> None:
-    """Simple synthetic price walk for paper/dev runs."""
+    """Simple synthetic price walk for paper/dev runs.
+
+    Timestamps advance monotonically using ``timedelta`` so long runs cross
+    hour and day boundaries without going backwards (the previous ``%60``
+    arithmetic only handled minute wraparound and corrupted bars hourly).
+    """
     import math
     import random
+    from datetime import timedelta
 
     instruments = [i.symbol for i in services.config.instruments.instruments]
     prices = {sym: 4500.0 + 100 * i for i, sym in enumerate(instruments)}
-    t = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    bars_per_minute = 6
+    base = datetime.now(timezone.utc).replace(microsecond=0)
+    ticks_per_minute = 6
+    tick_interval = timedelta(seconds=60.0 / ticks_per_minute)
     i = 0
     while not stop[0]:
-        i += 1
-        seconds_offset = (i * (60 // bars_per_minute)) % 60
-        ts = t.replace(second=seconds_offset) if seconds_offset < 60 else t
-        if seconds_offset == 0 and i > 1:
-            t = t.replace(minute=(t.minute + 1) % 60)
-            ts = t
+        ts = base + i * tick_interval
         for sym in instruments:
             drift = 0.05 * math.sin(i / 30.0)
             shock = random.gauss(0, 0.5)
             prices[sym] += drift + shock
             md.push_tick(MockMarketDataProvider.tick(sym, prices[sym], ts=ts, volume=1))
-        time.sleep(1.0 / bars_per_minute)
+        i += 1
+        time.sleep(tick_interval.total_seconds())
 
 
 if __name__ == "__main__":

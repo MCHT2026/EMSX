@@ -8,10 +8,10 @@ from datetime import datetime, timezone
 import click
 
 from ..core.enums import OrderStatus
-from ..core.events import ExecutionUpdate, FillUpdate, TargetPosition
+from ..core.events import ExecutionUpdate, FillUpdate, MarketTick, TargetPosition
 from ..core.logging import get_logger
 from ..orders.lifecycle import OrderLifecycle, OrderRecord
-from .topics import EXECUTION_UPDATES, FILLS, INTENTS, RISK_DECISIONS, TARGETS
+from .topics import EXECUTION_UPDATES, FILLS, INTENTS, RISK_DECISIONS, TARGETS, TICKS
 from .wiring import build_services
 
 log = get_logger(__name__)
@@ -41,10 +41,22 @@ def main(config_dir: str, metrics_port: int | None, emsx: bool, auto_route: bool
 
             decision = services.risk.validate(intent).decision
             services.event_log.append("RiskDecision", decision)
+            services.risk_decision_repo.insert(decision)
             services.bus.publish(RISK_DECISIONS, decision)
             if not decision.approved:
                 for reason in decision.reasons:
                     services.metrics.orders_rejected.labels(reason=reason.split(":")[0]).inc()
+                continue
+
+            # Claim idempotency AFTER risk approval. A transient risk rejection
+            # therefore leaves the key un-claimed and the next bar can retry.
+            if not services.idempotency.claim(intent.idempotency_key):
+                services.metrics.orders_rejected.labels(reason="duplicate").inc()
+                log.info(
+                    "intent_dropped_already_claimed",
+                    key=intent.idempotency_key,
+                    instrument=intent.instrument,
+                )
                 continue
 
             # Internal id = idempotency_key. Stable across paper and EMSX so the
@@ -121,13 +133,28 @@ def main(config_dir: str, metrics_port: int | None, emsx: bool, auto_route: bool
         services.positions.apply_fill(fill)
         services.pnl.apply_fill(fill)
         services.fills.record(fill)
+        services.fill_repo.insert(fill)
+        # Persist the updated position so a restart sees post-fill state.
+        avg = services.positions.avg_cost(fill.instrument) or 0.0
+        services.position_repo.upsert(
+            fill.instrument, services.positions.position(fill.instrument), avg
+        )
         services.metrics.fills_total.labels(instrument=fill.instrument).inc()
         services.metrics.open_position.labels(instrument=fill.instrument).set(
             services.positions.position(fill.instrument)
         )
 
+    def on_tick(_topic: str, tick: MarketTick) -> None:
+        # Risk gate consults the local stale monitor and tick store; without
+        # this subscription every intent would be rejected for stale data in
+        # split (Kafka/Redis) deployments.
+        services.tick_store.append(tick)
+        services.stale_monitor.on_tick(tick)
+        services.metrics.market_data_age.labels(instrument=tick.instrument).set(0)
+
     services.execution.on_execution_update(on_execution_update)
     services.execution.on_fill(on_fill)
+    services.bus.subscribe(TICKS, on_tick)
     services.bus.subscribe(TARGETS, on_target)
     services.execution.start()
     services.bus.start()

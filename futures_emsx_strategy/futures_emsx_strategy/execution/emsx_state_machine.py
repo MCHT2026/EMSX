@@ -86,6 +86,13 @@ class EMSXStateMachine:
         with self._lock:
             return self._states.get(order_id, OrderStatus.NEW)
 
+    def seed(self, order_id: str, state: OrderStatus = OrderStatus.UNKNOWN) -> None:
+        """Initialize the state for ``order_id``. Used by the adapter to register
+        a freshly-acked venue order under ``UNKNOWN`` so the first observed venue
+        transition (often a direct ``WORKING``) is not flagged as illegal."""
+        with self._lock:
+            self._states[order_id] = state
+
     def on_violation(self, cb: ViolationCallback) -> None:
         self._violations.append(cb)
 

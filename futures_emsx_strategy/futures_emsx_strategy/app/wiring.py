@@ -33,6 +33,12 @@ from ..risk.pre_trade import PreTradeRiskGateway
 from ..storage.db import Database
 from ..storage.event_log import JsonlEventLog
 from ..storage.idempotency_backend import SqliteIdempotencyBackend
+from ..storage.repositories import (
+    FillRepository,
+    OrderRepository,
+    PositionRepository,
+    RiskDecisionRepository,
+)
 from ..strategy.minute_strategy import MinuteFuturesStrategy
 
 log = get_logger(__name__)
@@ -62,6 +68,12 @@ class Services:
     risk: PreTradeRiskGateway
     execution: ExecutionAdapter
     strategies: list[MinuteFuturesStrategy]
+    # Repositories: durable side of in-memory state. Writes happen in the
+    # runners' fill/risk handlers; reads happen once at startup.
+    position_repo: PositionRepository
+    order_repo: OrderRepository
+    fill_repo: FillRepository
+    risk_decision_repo: RiskDecisionRepository
 
 
 def build_services(
@@ -105,6 +117,18 @@ def build_services(
     # SQLite-backed dedupe persists claimed keys so a restart cannot resubmit
     # an order that was already accepted before the crash.
     idempotency = IdempotencyStore(backend=SqliteIdempotencyBackend(db))
+
+    position_repo = PositionRepository(db)
+    order_repo = OrderRepository(db)
+    fill_repo = FillRepository(db)
+    risk_decision_repo = RiskDecisionRepository(db)
+    # Warm restart: hydrate the in-memory PositionBook from durable storage.
+    # Fills observed since the last persisted position update will be replayed
+    # by the venue subscription on reconnect; if not, reconciler picks them up.
+    for sym, (qty, avg_cost) in position_repo.all().items():
+        positions.set(sym, qty, avg_cost)
+    if position_repo.all():
+        log.info("positions_restored", count=len(position_repo.all()))
 
     order_manager = OrderManager(positions, working, idempotency)
     kill_switch = KillSwitch(armed=config.risk_limits.kill_switch_armed)
@@ -172,4 +196,8 @@ def build_services(
         risk=risk,
         execution=execution,
         strategies=strategies,
+        position_repo=position_repo,
+        order_repo=order_repo,
+        fill_repo=fill_repo,
+        risk_decision_repo=risk_decision_repo,
     )
