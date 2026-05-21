@@ -1,95 +1,95 @@
-\contentsline {section}{\numberline {1}Overview}{2}{section.1}%
-\contentsline {subsection}{\numberline {1.1}Architectural contract}{2}{subsection.1.1}%
-\contentsline {subsection}{\numberline {1.2}Event types (canonical)}{2}{subsection.1.2}%
-\contentsline {subsection}{\numberline {1.3}Notation used in this document}{2}{subsection.1.3}%
-\contentsline {section}{\numberline {2}Module \texttt {core/}}{3}{section.2}%
-\contentsline {subsection}{\numberline {2.1}\texttt {core.clock}}{3}{subsection.2.1}%
-\contentsline {subsection}{\numberline {2.2}\texttt {core.enums}}{3}{subsection.2.2}%
-\contentsline {subsection}{\numberline {2.3}\texttt {core.exceptions}}{4}{subsection.2.3}%
-\contentsline {subsection}{\numberline {2.4}\texttt {core.identifiers}}{4}{subsection.2.4}%
-\contentsline {subsection}{\numberline {2.5}\texttt {core.logging}}{5}{subsection.2.5}%
-\contentsline {subsection}{\numberline {2.6}\texttt {core.events}}{5}{subsection.2.6}%
-\contentsline {section}{\numberline {3}Module \texttt {config/}}{7}{section.3}%
-\contentsline {section}{\numberline {4}Module \texttt {market\_data/}}{8}{section.4}%
-\contentsline {subsection}{\numberline {4.1}\texttt {market\_data.base}}{8}{subsection.4.1}%
-\contentsline {subsection}{\numberline {4.2}\texttt {market\_data.bloomberg\_provider}}{8}{subsection.4.2}%
-\contentsline {subsection}{\numberline {4.3}\texttt {market\_data.mock\_provider}}{8}{subsection.4.3}%
-\contentsline {subsection}{\numberline {4.4}\texttt {market\_data.bar\_builder}}{8}{subsection.4.4}%
-\contentsline {subsection}{\numberline {4.5}\texttt {market\_data.tick\_store}}{9}{subsection.4.5}%
-\contentsline {subsection}{\numberline {4.6}\texttt {market\_data.contract\_resolver}}{9}{subsection.4.6}%
-\contentsline {subsection}{\numberline {4.7}\texttt {market\_data.stale\_data\_monitor}}{9}{subsection.4.7}%
-\contentsline {section}{\numberline {5}Module \texttt {strategy/}}{10}{section.5}%
-\contentsline {subsection}{\numberline {5.1}\texttt {strategy.base}}{10}{subsection.5.1}%
-\contentsline {subsection}{\numberline {5.2}\texttt {strategy.indicators}}{10}{subsection.5.2}%
-\contentsline {subsection}{\numberline {5.3}\texttt {strategy.signal\_state}}{10}{subsection.5.3}%
-\contentsline {subsection}{\numberline {5.4}\texttt {strategy.target\_position}}{10}{subsection.5.4}%
-\contentsline {subsection}{\numberline {5.5}\texttt {strategy.minute\_strategy}}{11}{subsection.5.5}%
-\contentsline {subsection}{\numberline {5.6}\texttt {strategy.roll\_logic}}{11}{subsection.5.6}%
-\contentsline {section}{\numberline {6}Module \texttt {portfolio/}}{12}{section.6}%
-\contentsline {subsection}{\numberline {6.1}\texttt {portfolio.positions}}{12}{subsection.6.1}%
-\contentsline {subsection}{\numberline {6.2}\texttt {portfolio.fills}}{12}{subsection.6.2}%
-\contentsline {subsection}{\numberline {6.3}\texttt {portfolio.pnl}}{12}{subsection.6.3}%
-\contentsline {subsection}{\numberline {6.4}\texttt {portfolio.exposure}}{12}{subsection.6.4}%
-\contentsline {subsection}{\numberline {6.5}\texttt {portfolio.reconciliation}}{13}{subsection.6.5}%
-\contentsline {section}{\numberline {7}Module \texttt {orders/}}{14}{section.7}%
-\contentsline {subsection}{\numberline {7.1}\texttt {orders.models}}{14}{subsection.7.1}%
-\contentsline {subsection}{\numberline {7.2}\texttt {orders.idempotency}}{14}{subsection.7.2}%
-\contentsline {subsection}{\numberline {7.3}\texttt {orders.throttles}}{14}{subsection.7.3}%
-\contentsline {subsection}{\numberline {7.4}\texttt {orders.sizing}}{14}{subsection.7.4}%
-\contentsline {subsection}{\numberline {7.5}\texttt {orders.lifecycle}}{15}{subsection.7.5}%
-\contentsline {subsection}{\numberline {7.6}\texttt {orders.order\_manager}}{15}{subsection.7.6}%
-\contentsline {section}{\numberline {8}Module \texttt {risk/}}{16}{section.8}%
-\contentsline {subsection}{\numberline {8.1}\texttt {risk.limits}}{16}{subsection.8.1}%
-\contentsline {subsection}{\numberline {8.2}\texttt {risk.validations}}{16}{subsection.8.2}%
-\contentsline {subsection}{\numberline {8.3}\texttt {risk.session\_checks}}{16}{subsection.8.3}%
-\contentsline {subsection}{\numberline {8.4}\texttt {risk.kill\_switch}}{16}{subsection.8.4}%
-\contentsline {subsection}{\numberline {8.5}\texttt {risk.pre\_trade}}{16}{subsection.8.5}%
-\contentsline {section}{\numberline {9}Module \texttt {execution/}}{18}{section.9}%
-\contentsline {subsection}{\numberline {9.1}\texttt {execution.base}}{18}{subsection.9.1}%
-\contentsline {subsection}{\numberline {9.2}\texttt {execution.emsx\_mapper}}{18}{subsection.9.2}%
-\contentsline {subsection}{\numberline {9.3}\texttt {execution.emsx\_requests}}{18}{subsection.9.3}%
-\contentsline {subsection}{\numberline {9.4}\texttt {execution.emsx\_subscriptions}}{19}{subsection.9.4}%
-\contentsline {subsection}{\numberline {9.5}\texttt {execution.emsx\_state\_machine}}{19}{subsection.9.5}%
-\contentsline {subsection}{\numberline {9.6}\texttt {execution.emsx\_adapter}}{19}{subsection.9.6}%
-\contentsline {subsection}{\numberline {9.7}\texttt {execution.paper\_adapter}}{19}{subsection.9.7}%
-\contentsline {section}{\numberline {10}Module \texttt {storage/}}{21}{section.10}%
-\contentsline {subsection}{\numberline {10.1}\texttt {storage.db}}{21}{subsection.10.1}%
-\contentsline {subsection}{\numberline {10.2}\texttt {storage.event\_log}}{21}{subsection.10.2}%
-\contentsline {subsection}{\numberline {10.3}\texttt {storage.repositories}}{21}{subsection.10.3}%
-\contentsline {subsection}{\numberline {10.4}\texttt {storage.snapshots}}{21}{subsection.10.4}%
-\contentsline {section}{\numberline {11}Module \texttt {messaging/}}{22}{section.11}%
-\contentsline {subsection}{\numberline {11.1}\texttt {messaging.bus}}{22}{subsection.11.1}%
-\contentsline {subsection}{\numberline {11.2}\texttt {messaging.in\_memory\_bus}}{22}{subsection.11.2}%
-\contentsline {subsection}{\numberline {11.3}\texttt {messaging.kafka\_bus}}{22}{subsection.11.3}%
-\contentsline {subsection}{\numberline {11.4}\texttt {messaging.redis\_bus}}{22}{subsection.11.4}%
-\contentsline {section}{\numberline {12}Module \texttt {monitoring/}}{23}{section.12}%
-\contentsline {subsection}{\numberline {12.1}\texttt {monitoring.metrics}}{23}{subsection.12.1}%
-\contentsline {subsection}{\numberline {12.2}\texttt {monitoring.health}}{23}{subsection.12.2}%
-\contentsline {subsection}{\numberline {12.3}\texttt {monitoring.alerts}}{23}{subsection.12.3}%
-\contentsline {section}{\numberline {13}Module \texttt {backtest/}}{24}{section.13}%
-\contentsline {subsection}{\numberline {13.1}\texttt {backtest.slippage}}{24}{subsection.13.1}%
-\contentsline {subsection}{\numberline {13.2}\texttt {backtest.commission}}{24}{subsection.13.2}%
-\contentsline {subsection}{\numberline {13.3}\texttt {backtest.replay}}{24}{subsection.13.3}%
-\contentsline {subsection}{\numberline {13.4}\texttt {backtest.engine}}{24}{subsection.13.4}%
-\contentsline {subsection}{\numberline {13.5}\texttt {backtest.reports}}{24}{subsection.13.5}%
-\contentsline {section}{\numberline {14}Module \texttt {app/}}{26}{section.14}%
-\contentsline {subsection}{\numberline {14.1}\texttt {app.topics}}{26}{subsection.14.1}%
-\contentsline {subsection}{\numberline {14.2}\texttt {app.wiring}}{26}{subsection.14.2}%
-\contentsline {subsection}{\numberline {14.3}\texttt {app.run\_market\_data}}{26}{subsection.14.3}%
-\contentsline {subsection}{\numberline {14.4}\texttt {app.run\_strategy}}{26}{subsection.14.4}%
-\contentsline {subsection}{\numberline {14.5}\texttt {app.run\_execution}}{27}{subsection.14.5}%
-\contentsline {subsection}{\numberline {14.6}\texttt {app.run\_reconciler}}{27}{subsection.14.6}%
-\contentsline {subsection}{\numberline {14.7}\texttt {app.run\_all\_local}}{27}{subsection.14.7}%
-\contentsline {section}{\numberline {15}Topology \& guarantees}{28}{section.15}%
-\contentsline {subsection}{\numberline {15.1}Service boundaries}{28}{subsection.15.1}%
-\contentsline {subsection}{\numberline {15.2}Idempotency \& at-least-once delivery}{28}{subsection.15.2}%
-\contentsline {subsection}{\numberline {15.3}State-machine invariants}{28}{subsection.15.3}%
-\contentsline {subsection}{\numberline {15.4}Phased rollout flags}{28}{subsection.15.4}%
-\contentsline {subsection}{\numberline {15.5}Error budget for live trading}{28}{subsection.15.5}%
-\contentsline {section}{\numberline {16}Quick reference --- minimum contracts to satisfy when extending}{29}{section.16}%
-\contentsline {subsection}{\numberline {16.1}Adding a market-data vendor}{29}{subsection.16.1}%
-\contentsline {subsection}{\numberline {16.2}Adding a venue}{29}{subsection.16.2}%
-\contentsline {subsection}{\numberline {16.3}Adding a strategy}{29}{subsection.16.3}%
-\contentsline {subsection}{\numberline {16.4}Adding a risk check}{29}{subsection.16.4}%
-\contentsline {subsection}{\numberline {16.5}Adding a bus implementation}{29}{subsection.16.5}%
-\contentsline {section}{\numberline {17}Test contract surface}{30}{section.17}%
+\contentsline {section}{\numberline {1}Overview}{4}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Architectural contract}{4}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Event types (canonical)}{4}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}Notation used in this document}{4}{subsection.1.3}%
+\contentsline {section}{\numberline {2}Module \texttt {core/}}{5}{section.2}%
+\contentsline {subsection}{\numberline {2.1}\texttt {core.clock}}{5}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}\texttt {core.enums}}{5}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}\texttt {core.exceptions}}{6}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}\texttt {core.identifiers}}{6}{subsection.2.4}%
+\contentsline {subsection}{\numberline {2.5}\texttt {core.logging}}{7}{subsection.2.5}%
+\contentsline {subsection}{\numberline {2.6}\texttt {core.events}}{7}{subsection.2.6}%
+\contentsline {section}{\numberline {3}Module \texttt {config/}}{9}{section.3}%
+\contentsline {section}{\numberline {4}Module \texttt {market\_data/}}{10}{section.4}%
+\contentsline {subsection}{\numberline {4.1}\texttt {market\_data.base}}{10}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}\texttt {market\_data.bloomberg\_provider}}{10}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}\texttt {market\_data.mock\_provider}}{10}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}\texttt {market\_data.bar\_builder}}{10}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}\texttt {market\_data.tick\_store}}{11}{subsection.4.5}%
+\contentsline {subsection}{\numberline {4.6}\texttt {market\_data.contract\_resolver}}{11}{subsection.4.6}%
+\contentsline {subsection}{\numberline {4.7}\texttt {market\_data.stale\_data\_monitor}}{11}{subsection.4.7}%
+\contentsline {section}{\numberline {5}Module \texttt {strategy/}}{12}{section.5}%
+\contentsline {subsection}{\numberline {5.1}\texttt {strategy.base}}{12}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}\texttt {strategy.indicators}}{12}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}\texttt {strategy.signal\_state}}{12}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}\texttt {strategy.target\_position}}{12}{subsection.5.4}%
+\contentsline {subsection}{\numberline {5.5}\texttt {strategy.minute\_strategy}}{13}{subsection.5.5}%
+\contentsline {subsection}{\numberline {5.6}\texttt {strategy.roll\_logic}}{13}{subsection.5.6}%
+\contentsline {section}{\numberline {6}Module \texttt {portfolio/}}{14}{section.6}%
+\contentsline {subsection}{\numberline {6.1}\texttt {portfolio.positions}}{14}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}\texttt {portfolio.fills}}{14}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}\texttt {portfolio.pnl}}{14}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}\texttt {portfolio.exposure}}{14}{subsection.6.4}%
+\contentsline {subsection}{\numberline {6.5}\texttt {portfolio.reconciliation}}{15}{subsection.6.5}%
+\contentsline {section}{\numberline {7}Module \texttt {orders/}}{16}{section.7}%
+\contentsline {subsection}{\numberline {7.1}\texttt {orders.models}}{16}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}\texttt {orders.idempotency}}{16}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}\texttt {orders.throttles}}{16}{subsection.7.3}%
+\contentsline {subsection}{\numberline {7.4}\texttt {orders.sizing}}{16}{subsection.7.4}%
+\contentsline {subsection}{\numberline {7.5}\texttt {orders.lifecycle}}{17}{subsection.7.5}%
+\contentsline {subsection}{\numberline {7.6}\texttt {orders.order\_manager}}{17}{subsection.7.6}%
+\contentsline {section}{\numberline {8}Module \texttt {risk/}}{18}{section.8}%
+\contentsline {subsection}{\numberline {8.1}\texttt {risk.limits}}{18}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}\texttt {risk.validations}}{18}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}\texttt {risk.session\_checks}}{18}{subsection.8.3}%
+\contentsline {subsection}{\numberline {8.4}\texttt {risk.kill\_switch}}{18}{subsection.8.4}%
+\contentsline {subsection}{\numberline {8.5}\texttt {risk.pre\_trade}}{18}{subsection.8.5}%
+\contentsline {section}{\numberline {9}Module \texttt {execution/}}{20}{section.9}%
+\contentsline {subsection}{\numberline {9.1}\texttt {execution.base}}{20}{subsection.9.1}%
+\contentsline {subsection}{\numberline {9.2}\texttt {execution.emsx\_mapper}}{20}{subsection.9.2}%
+\contentsline {subsection}{\numberline {9.3}\texttt {execution.emsx\_requests}}{20}{subsection.9.3}%
+\contentsline {subsection}{\numberline {9.4}\texttt {execution.emsx\_subscriptions}}{21}{subsection.9.4}%
+\contentsline {subsection}{\numberline {9.5}\texttt {execution.emsx\_state\_machine}}{21}{subsection.9.5}%
+\contentsline {subsection}{\numberline {9.6}\texttt {execution.emsx\_adapter}}{21}{subsection.9.6}%
+\contentsline {subsection}{\numberline {9.7}\texttt {execution.paper\_adapter}}{21}{subsection.9.7}%
+\contentsline {section}{\numberline {10}Module \texttt {storage/}}{23}{section.10}%
+\contentsline {subsection}{\numberline {10.1}\texttt {storage.db}}{23}{subsection.10.1}%
+\contentsline {subsection}{\numberline {10.2}\texttt {storage.event\_log}}{23}{subsection.10.2}%
+\contentsline {subsection}{\numberline {10.3}\texttt {storage.repositories}}{23}{subsection.10.3}%
+\contentsline {subsection}{\numberline {10.4}\texttt {storage.snapshots}}{23}{subsection.10.4}%
+\contentsline {section}{\numberline {11}Module \texttt {messaging/}}{24}{section.11}%
+\contentsline {subsection}{\numberline {11.1}\texttt {messaging.bus}}{24}{subsection.11.1}%
+\contentsline {subsection}{\numberline {11.2}\texttt {messaging.in\_memory\_bus}}{24}{subsection.11.2}%
+\contentsline {subsection}{\numberline {11.3}\texttt {messaging.kafka\_bus}}{24}{subsection.11.3}%
+\contentsline {subsection}{\numberline {11.4}\texttt {messaging.redis\_bus}}{24}{subsection.11.4}%
+\contentsline {section}{\numberline {12}Module \texttt {monitoring/}}{25}{section.12}%
+\contentsline {subsection}{\numberline {12.1}\texttt {monitoring.metrics}}{25}{subsection.12.1}%
+\contentsline {subsection}{\numberline {12.2}\texttt {monitoring.health}}{25}{subsection.12.2}%
+\contentsline {subsection}{\numberline {12.3}\texttt {monitoring.alerts}}{25}{subsection.12.3}%
+\contentsline {section}{\numberline {13}Module \texttt {backtest/}}{26}{section.13}%
+\contentsline {subsection}{\numberline {13.1}\texttt {backtest.slippage}}{26}{subsection.13.1}%
+\contentsline {subsection}{\numberline {13.2}\texttt {backtest.commission}}{26}{subsection.13.2}%
+\contentsline {subsection}{\numberline {13.3}\texttt {backtest.replay}}{26}{subsection.13.3}%
+\contentsline {subsection}{\numberline {13.4}\texttt {backtest.engine}}{26}{subsection.13.4}%
+\contentsline {subsection}{\numberline {13.5}\texttt {backtest.reports}}{26}{subsection.13.5}%
+\contentsline {section}{\numberline {14}Module \texttt {app/}}{28}{section.14}%
+\contentsline {subsection}{\numberline {14.1}\texttt {app.topics}}{28}{subsection.14.1}%
+\contentsline {subsection}{\numberline {14.2}\texttt {app.wiring}}{28}{subsection.14.2}%
+\contentsline {subsection}{\numberline {14.3}\texttt {app.run\_market\_data}}{28}{subsection.14.3}%
+\contentsline {subsection}{\numberline {14.4}\texttt {app.run\_strategy}}{28}{subsection.14.4}%
+\contentsline {subsection}{\numberline {14.5}\texttt {app.run\_execution}}{29}{subsection.14.5}%
+\contentsline {subsection}{\numberline {14.6}\texttt {app.run\_reconciler}}{29}{subsection.14.6}%
+\contentsline {subsection}{\numberline {14.7}\texttt {app.run\_all\_local}}{29}{subsection.14.7}%
+\contentsline {section}{\numberline {15}Topology \& guarantees}{30}{section.15}%
+\contentsline {subsection}{\numberline {15.1}Service boundaries}{30}{subsection.15.1}%
+\contentsline {subsection}{\numberline {15.2}Idempotency \& at-least-once delivery}{30}{subsection.15.2}%
+\contentsline {subsection}{\numberline {15.3}State-machine invariants}{30}{subsection.15.3}%
+\contentsline {subsection}{\numberline {15.4}Phased rollout flags}{30}{subsection.15.4}%
+\contentsline {subsection}{\numberline {15.5}Error budget for live trading}{30}{subsection.15.5}%
+\contentsline {section}{\numberline {16}Quick reference --- minimum contracts to satisfy when extending}{31}{section.16}%
+\contentsline {subsection}{\numberline {16.1}Adding a market-data vendor}{31}{subsection.16.1}%
+\contentsline {subsection}{\numberline {16.2}Adding a venue}{31}{subsection.16.2}%
+\contentsline {subsection}{\numberline {16.3}Adding a strategy}{31}{subsection.16.3}%
+\contentsline {subsection}{\numberline {16.4}Adding a risk check}{31}{subsection.16.4}%
+\contentsline {subsection}{\numberline {16.5}Adding a bus implementation}{31}{subsection.16.5}%
+\contentsline {section}{\numberline {17}Test contract surface}{32}{section.17}%
